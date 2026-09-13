@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { getScopedDb } from "@/lib/tenant-db";
 import { requireFeature } from "@/lib/feature-flags";
 import { grantClassAttendanceAccess, revokeClassAttendanceAccess } from "./actions";
+import { enrollStudent } from "@/lib/domain/enrollment";
 
 async function requireAdmin() {
   const session = await auth();
@@ -56,6 +57,9 @@ export async function bulkReshuffleStudents(studentIds: string[], targetClassId:
   await requireFeature(schoolId, "classes.coTeacherAndReshuffle");
   const sdb = await getScopedDb();
   await sdb.student.updateMany({ where: { id: { in: studentIds } }, data: { classId: targetClassId } });
+  for (const studentId of studentIds) {
+    await enrollStudent(studentId, targetClassId);
+  }
   revalidatePath("/app/students");
   return { moved: studentIds.length };
 }

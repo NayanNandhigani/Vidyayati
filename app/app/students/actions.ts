@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { auth } from "@/auth";
 import { getScopedDb, scopedCreateData } from "@/lib/tenant-db";
 import { requireModuleAccess } from "@/lib/permissions";
+import { enrollStudent } from "@/lib/domain/enrollment";
 
 export type StudentFormState = { error?: string };
 
@@ -57,6 +58,8 @@ export async function createStudent(_prevState: StudentFormState, formData: Form
     }
     throw e;
   }
+
+  await enrollStudent(student.id, classId);
 
   revalidatePath("/app/students");
   redirect(`/app/students/${student.id}`);

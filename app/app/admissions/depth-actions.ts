@@ -6,6 +6,7 @@ import { auth } from "@/auth";
 import { getScopedDb, scopedCreateData } from "@/lib/tenant-db";
 import { requireModuleAccess } from "@/lib/permissions";
 import { requireFeature } from "@/lib/feature-flags";
+import { enrollStudent } from "@/lib/domain/enrollment";
 
 async function schoolId() {
   const session = await auth();
@@ -117,6 +118,7 @@ export async function approveAdmissionWithFee(
       chargedFee,
     }),
   });
+  await enrollStudent(student.id, classId);
 
   if (openingFeeAmount && openingFeeAmount > 0) {
     await sdb.feeAdjustment.create({

@@ -120,6 +120,7 @@ model School {
   academicYears        AcademicYear[]
   terms                Term[]
   academicGrades       AcademicGrade[]
+  enrollments          Enrollment[]
   classes              Class[]
   subjects             Subject[]
   classSubjectTeachers ClassSubjectTeacher[]
@@ -938,6 +939,7 @@ model AcademicYear {
   classFeeDefaults ClassFeeDefault[]
   terms            Term[]
   academicGrades   AcademicGrade[]
+  enrollments      Enrollment[]
 
   @@index([schoolId])
   @@map("academic_years")
@@ -1053,6 +1055,7 @@ model Class {
   staffPermissions StaffPermission[]
   subjectTeachers  ClassSubjectTeacher[]
   coTeachers       ClassCoTeacher[]
+  enrollments      Enrollment[]
 
   @@unique([yearId, grade, section])
   @@index([schoolId])
@@ -1181,11 +1184,57 @@ model Student {
   hostelVisitorLogs   HostelVisitorLog[]
   hostelOutingRequests HostelOutingRequest[]
   laundryTickets      LaundryTicket[]
+  enrollments         Enrollment[]
 
-  @@unique([admissionNo, classId])
+  // Architecture V1, Milestone 4 (item 59): admission numbers are unique
+  // per school, not per (admissionNo, classId) — a school-wide identifier
+  // shouldn't be able to collide just because two students land in
+  // different classes. No existing data violated this when it was
+  // tightened (verified before migrating).
+  @@unique([schoolId, admissionNo])
   @@index([schoolId])
   @@index([classId])
   @@map("students")
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  PROMOTED
+  TRANSFERRED
+  WITHDRAWN
+}
+
+// Architecture V1, Milestone 4 — additive: exists alongside Student.classId
+// (kept, unchanged) rather than replacing it. New writes (admission
+// approval, class reshuffle) create/close Enrollment rows starting now,
+// giving every student a real history of which class they were in each
+// academic year; existing read paths (Attendance, Exams, Fees, Homework,
+// Timetable, Reports, Dashboard) keep reading Student.classId directly
+// until each is migrated in its own later milestone. Only once every read
+// path goes through Enrollment does Student.classId finally get dropped —
+// not yet, and not in this milestone.
+model Enrollment {
+  id             String           @id @default(cuid())
+  schoolId       String           @map("school_id")
+  school         School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  studentId      String           @map("student_id")
+  student        Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  academicYearId String           @map("academic_year_id")
+  academicYear   AcademicYear     @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  classId        String           @map("class_id")
+  class          Class            @relation(fields: [classId], references: [id], onDelete: Cascade)
+  rollNumber     String?          @map("roll_number")
+  status         EnrollmentStatus @default(ACTIVE)
+  enrolledOn     DateTime         @default(now()) @map("enrolled_on")
+  endedOn        DateTime?        @map("ended_on")
+
+  @@unique([studentId, academicYearId])
+  @@index([schoolId])
+  @@index([studentId])
+  @@index([classId])
+  @@index([academicYearId])
+  @@map("enrollments")
 }
 
 // Ordered list (by `priority`, ascending — 1 is called first) — a student
