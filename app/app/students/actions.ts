@@ -30,6 +30,7 @@ export async function createStudent(_prevState: StudentFormState, formData: Form
 
   await requireModuleAccess("Students", "EDIT", classId);
   const sdb = await getScopedDb();
+  await sdb.class.findUniqueOrThrow({ where: { id: classId }, select: { id: true } });
 
   const session = await auth();
   const school = await db.school.findUnique({ where: { id: session!.user.schoolId! }, select: { maxStudents: true } });

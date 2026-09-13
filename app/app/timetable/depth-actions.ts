@@ -58,6 +58,11 @@ export async function setTimetableSlotWithRoom(
     return {};
   }
 
+  await sdb.class.findUniqueOrThrow({ where: { id: classId }, select: { id: true } });
+  await sdb.subject.findUniqueOrThrow({ where: { id: subjectId }, select: { id: true } });
+  await sdb.staffProfile.findUniqueOrThrow({ where: { id: staffId }, select: { id: true } });
+  if (roomId) await sdb.room.findUniqueOrThrow({ where: { id: roomId }, select: { id: true } });
+
   const [teacherConflict, roomConflict] = await Promise.all([
     sdb.timetableSlot.findFirst({
       where: { staffId, dayOfWeek, periodNo, classId: { not: classId } },

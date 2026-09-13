@@ -71,6 +71,8 @@ export async function cyclePermission(staffId: string, moduleName: string, class
   const session = await auth();
   if (session!.user.role !== "SCHOOL_ADMIN") throw new Error("Only a School Admin can change permissions.");
   const sdb = await getScopedDb();
+  await sdb.staffProfile.findUniqueOrThrow({ where: { id: staffId }, select: { id: true } });
+  if (classId !== null) await sdb.class.findUniqueOrThrow({ where: { id: classId }, select: { id: true } });
 
   const CYCLE: AccessLevel[] = ["NONE", "VIEW", "EDIT"];
 

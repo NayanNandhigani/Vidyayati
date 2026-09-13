@@ -163,6 +163,9 @@ export async function createGradeBand(_prevState: FormState, formData: FormData)
     return { error: "Enter a valid percentage range (0–100, min ≤ max)." };
   }
 
+  const scale = await sdb.gradeScale.findUnique({ where: { id: scaleId }, select: { id: true } });
+  if (!scale) return { error: "That grade scale could not be found." };
+
   await sdb.gradeBand.create({
     data: scopedCreateData<Prisma.GradeBandUncheckedCreateInput>({
       scaleId,

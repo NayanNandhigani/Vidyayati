@@ -21,6 +21,10 @@ export async function setTimetableSlot(
     return { success: true };
   }
 
+  await sdb.class.findUniqueOrThrow({ where: { id: classId }, select: { id: true } });
+  await sdb.subject.findUniqueOrThrow({ where: { id: subjectId }, select: { id: true } });
+  await sdb.staffProfile.findUniqueOrThrow({ where: { id: staffId }, select: { id: true } });
+
   await sdb.timetableSlot.upsert({
     where: { classId_dayOfWeek_periodNo: { classId, dayOfWeek, periodNo } },
     update: { subjectId, staffId },

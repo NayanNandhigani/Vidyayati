@@ -51,6 +51,7 @@ export async function createClass(_prevState: FormState, formData: FormData): Pr
   if (existing) return { error: `Class ${gradeTrim}-${sectionTrim} already exists.` };
 
   const newTeacherStaffId = typeof classTeacherStaffId === "string" && classTeacherStaffId ? classTeacherStaffId : null;
+  if (newTeacherStaffId) await sdb.staffProfile.findUniqueOrThrow({ where: { id: newTeacherStaffId }, select: { id: true } });
   const newClass = await sdb.class.create({
     data: scopedCreateData<Prisma.ClassUncheckedCreateInput>({
       yearId: currentYear.id,
@@ -69,6 +70,7 @@ export async function setClassTeacher(classId: string, staffId: string | null) {
   await requireAdmin();
   const sdb = await getScopedDb();
   const existing = await sdb.class.findUniqueOrThrow({ where: { id: classId }, select: { classTeacherStaffId: true } });
+  if (staffId) await sdb.staffProfile.findUniqueOrThrow({ where: { id: staffId }, select: { id: true } });
   await sdb.class.update({ where: { id: classId }, data: { classTeacherStaffId: staffId } });
 
   if (existing.classTeacherStaffId && existing.classTeacherStaffId !== staffId) {
@@ -133,9 +135,16 @@ export async function createSubject(_prevState: FormState, formData: FormData): 
     .filter((a): a is { classId: string; staffId: string } => typeof a.staffId === "string" && a.staffId.length > 0);
 
   if (assignments.length > 0) {
-    await sdb.classSubjectTeacher.createMany({
-      data: assignments.map((a) => scopedCreateData<Prisma.ClassSubjectTeacherUncheckedCreateInput>({ classId: a.classId, subjectId: subject.id, staffId: a.staffId })),
-    });
+    // staffId comes straight from client form data — validate every one
+    // belongs to this school before it's attached to the new subject.
+    const validStaff = await sdb.staffProfile.findMany({ where: { id: { in: assignments.map((a) => a.staffId) } }, select: { id: true } });
+    const validStaffIds = new Set(validStaff.map((s) => s.id));
+    const validAssignments = assignments.filter((a) => validStaffIds.has(a.staffId));
+    if (validAssignments.length > 0) {
+      await sdb.classSubjectTeacher.createMany({
+        data: validAssignments.map((a) => scopedCreateData<Prisma.ClassSubjectTeacherUncheckedCreateInput>({ classId: a.classId, subjectId: subject.id, staffId: a.staffId })),
+      });
+    }
   }
 
   revalidatePath("/app/institute");
@@ -180,6 +189,15 @@ export async function setClassFeeDefault(grade: string, actualFee: number) {
 export async function setClassSubjectTeacher(classId: string, subjectId: string, staffId: string | null) {
   await requireAdmin();
   const sdb = await getScopedDb();
+
+  // classId/subjectId/staffId are client-supplied — the create branch below
+  // doesn't go through a schoolId-filtered where clause the way an update
+  // does, so a cross-tenant id would otherwise slip straight into a create.
+  // These lookups throw (tenant-scoped, so a foreign id 404s) before that
+  // can happen.
+  await sdb.class.findUniqueOrThrow({ where: { id: classId }, select: { id: true } });
+  await sdb.subject.findUniqueOrThrow({ where: { id: subjectId }, select: { id: true } });
+  if (staffId) await sdb.staffProfile.findUniqueOrThrow({ where: { id: staffId }, select: { id: true } });
 
   if (!staffId) {
     await sdb.classSubjectTeacher.deleteMany({ where: { classId, subjectId } });

@@ -1094,6 +1094,7 @@ model Subject {
   timetableSlots   TimetableSlot[]
   classAssignments ClassSubjectTeacher[]
 
+  @@unique([schoolId, name])
   @@index([schoolId])
   @@map("subjects")
 }

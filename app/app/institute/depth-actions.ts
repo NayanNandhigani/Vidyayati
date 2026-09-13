@@ -33,6 +33,8 @@ export async function addCoTeacher(classId: string, staffId: string) {
   const schoolId = await requireAdmin();
   await requireFeature(schoolId, "classes.coTeacherAndReshuffle");
   const sdb = await getScopedDb();
+  await sdb.class.findUniqueOrThrow({ where: { id: classId }, select: { id: true } });
+  await sdb.staffProfile.findUniqueOrThrow({ where: { id: staffId }, select: { id: true } });
   await sdb.classCoTeacher.upsert({
     where: { classId_staffId: { classId, staffId } },
     update: {},

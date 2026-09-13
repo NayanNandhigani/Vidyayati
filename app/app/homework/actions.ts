@@ -37,6 +37,13 @@ export async function createHomework(_prevState: HomeworkFormState, formData: Fo
     return { error: "Staff profile not found." };
   }
 
+  // classId/subjectId are client-supplied form fields — validate they
+  // belong to this school before anything gets created against them.
+  const cls = await sdb.class.findUnique({ where: { id: classId } });
+  if (!cls) return { error: "That class could not be found." };
+  const subject = await sdb.subject.findUnique({ where: { id: subjectId }, select: { id: true } });
+  if (!subject) return { error: "That subject could not be found." };
+
   // A Staff member's own homework is always attributed to themselves. A
   // School Admin has no staff record of their own, so the form asks them
   // to pick which teacher it should show as — defaulting to the class's
@@ -46,10 +53,11 @@ export async function createHomework(_prevState: HomeworkFormState, formData: Fo
   if (!staffId) {
     const submittedStaffId = formData.get("staffId");
     if (typeof submittedStaffId === "string" && submittedStaffId) {
+      const submittedStaff = await sdb.staffProfile.findUnique({ where: { id: submittedStaffId }, select: { id: true } });
+      if (!submittedStaff) return { error: "That teacher could not be found." };
       staffId = submittedStaffId;
     } else {
-      const cls = await sdb.class.findUnique({ where: { id: classId } });
-      staffId = cls?.classTeacherStaffId ?? undefined;
+      staffId = cls.classTeacherStaffId ?? undefined;
     }
   }
   if (!staffId) {

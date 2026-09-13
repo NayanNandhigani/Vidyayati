@@ -19,6 +19,7 @@ export async function addStaffDocument(staffId: string, category: string, formDa
   const sdb = await getScopedDb();
   await requireModuleAccess("Employees", "EDIT");
   await requireFeature(await schoolId(), "employees.documents");
+  await sdb.staffProfile.findUniqueOrThrow({ where: { id: staffId }, select: { id: true } });
 
   const file = formData.get("file");
   const expiryDate = formData.get("expiryDate");

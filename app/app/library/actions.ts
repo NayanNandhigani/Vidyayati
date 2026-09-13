@@ -84,6 +84,7 @@ export async function issueBook(studentId: string, bookId: string) {
   const sdb = await getScopedDb();
 
   const book = await sdb.libraryBook.findUniqueOrThrow({ where: { id: bookId } });
+  await sdb.student.findUniqueOrThrow({ where: { id: studentId }, select: { id: true } });
   if (book.copiesAvailable <= 0) throw new Error("No copies available.");
 
   const issueDate = new Date();

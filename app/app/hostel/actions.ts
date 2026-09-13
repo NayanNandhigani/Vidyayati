@@ -49,6 +49,7 @@ export async function allocateRoom(roomId: string, studentId: string) {
   const [room, allocatedCount] = await Promise.all([
     sdb.hostelRoom.findUniqueOrThrow({ where: { id: roomId } }),
     sdb.hostelAllocation.count({ where: { roomId } }),
+    sdb.student.findUniqueOrThrow({ where: { id: studentId }, select: { id: true } }),
   ]);
   if (allocatedCount >= room.capacity) throw new Error("Room is at full capacity.");
 
@@ -71,6 +72,7 @@ export async function removeAllocation(studentId: string) {
 export async function addFacility(roomId: string, type: HostelFacilityType, label: string | null) {
   await requireModuleAccess("Hostel", "EDIT");
   const sdb = await getScopedDb();
+  await sdb.hostelRoom.findUniqueOrThrow({ where: { id: roomId }, select: { id: true } });
   await sdb.hostelFacility.create({
     data: scopedCreateData<Prisma.HostelFacilityUncheckedCreateInput>({ roomId, type, label: label?.trim() || null }),
   });

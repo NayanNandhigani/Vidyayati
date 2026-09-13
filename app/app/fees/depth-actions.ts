@@ -16,6 +16,7 @@ export async function addFeeDiscount(studentId: string, kind: DiscountKind, valu
   await requireModuleAccess("Fees", "EDIT");
   await requireFeature(await schoolId(), "fees.discountsAndFines");
   const sdb = await getScopedDb();
+  await sdb.student.findUniqueOrThrow({ where: { id: studentId }, select: { id: true } });
   await sdb.feeDiscount.create({
     data: scopedCreateData<Prisma.FeeDiscountUncheckedCreateInput>({ studentId, kind, valueType, value, note: note.trim() || null }),
   });
@@ -36,6 +37,7 @@ export async function addFeeAdjustment(studentId: string, description: string, a
   await requireFeature(await schoolId(), "fees.discountsAndFines");
   if (!description.trim() || !(amount > 0)) throw new Error("A description and a positive amount are required.");
   const sdb = await getScopedDb();
+  await sdb.student.findUniqueOrThrow({ where: { id: studentId }, select: { id: true } });
   await sdb.feeAdjustment.create({
     data: scopedCreateData<Prisma.FeeAdjustmentUncheckedCreateInput>({ studentId, description: description.trim(), amount }),
   });

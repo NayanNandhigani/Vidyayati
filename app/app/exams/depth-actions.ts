@@ -21,6 +21,9 @@ export async function randomizeSeating(examId: string, roomIds: string[]) {
 
   if (roomIds.length === 0) throw new Error("Choose at least one room.");
 
+  const validRooms = await sdb.room.findMany({ where: { id: { in: roomIds } }, select: { id: true } });
+  if (validRooms.length !== roomIds.length) throw new Error("One or more selected rooms could not be found.");
+
   const students = await sdb.student.findMany({ where: { classId: exam.classId, status: "ACTIVE" } });
   const shuffled = [...students].sort(() => Math.random() - 0.5);
 

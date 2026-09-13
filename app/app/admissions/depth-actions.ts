@@ -92,8 +92,9 @@ export async function approveAdmissionWithFee(
   const enquiry = await sdb.admissionEnquiry.findUniqueOrThrow({ where: { id: enquiryId } });
   if (enquiry.approvalStatus !== "PENDING") throw new Error("This application isn't pending approval.");
 
+  const targetClass = await sdb.class.findUniqueOrThrow({ where: { id: classId }, select: { grade: true, yearId: true } });
+
   if (chargedFee != null) {
-    const targetClass = await sdb.class.findUniqueOrThrow({ where: { id: classId }, select: { grade: true, yearId: true } });
     const feeDefault = await sdb.classFeeDefault.findUnique({ where: { yearId_grade: { yearId: targetClass.yearId, grade: targetClass.grade } } });
     if (feeDefault && chargedFee > Number(feeDefault.actualFee)) {
       throw new Error("Charged fee can't be more than the actual fee.");

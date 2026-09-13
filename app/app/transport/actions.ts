@@ -18,10 +18,16 @@ export async function createRoute(_prevState: FormState, formData: FormData): Pr
 
   if (typeof name !== "string" || !name.trim()) return { error: "Route name is required." };
 
+  const vehicleIdValue = typeof vehicleId === "string" && vehicleId ? vehicleId : null;
+  if (vehicleIdValue) {
+    const vehicle = await sdb.transportVehicle.findUnique({ where: { id: vehicleIdValue }, select: { id: true } });
+    if (!vehicle) return { error: "That vehicle could not be found." };
+  }
+
   const route = await sdb.transportRoute.create({
     data: scopedCreateData<Prisma.TransportRouteUncheckedCreateInput>({
       name: name.trim(),
-      vehicleId: typeof vehicleId === "string" && vehicleId ? vehicleId : null,
+      vehicleId: vehicleIdValue,
       feeAmount: typeof feeAmount === "string" && feeAmount ? Number(feeAmount) : null,
     }),
   });
@@ -33,6 +39,7 @@ export async function createRoute(_prevState: FormState, formData: FormData): Pr
 export async function updateRouteVehicleAndFee(routeId: string, vehicleId: string | null, feeAmount: number | null) {
   await requireModuleAccess("Transport", "EDIT");
   const sdb = await getScopedDb();
+  if (vehicleId) await sdb.transportVehicle.findUniqueOrThrow({ where: { id: vehicleId }, select: { id: true } });
   await sdb.transportRoute.update({ where: { id: routeId }, data: { vehicleId, feeAmount } });
   revalidatePath("/app/transport");
 }
@@ -40,6 +47,7 @@ export async function updateRouteVehicleAndFee(routeId: string, vehicleId: strin
 export async function addStop(routeId: string, stopName: string, pickupTime: string) {
   await requireModuleAccess("Transport", "EDIT");
   const sdb = await getScopedDb();
+  await sdb.transportRoute.findUniqueOrThrow({ where: { id: routeId }, select: { id: true } });
   const count = await sdb.transportStop.count({ where: { routeId } });
 
   await sdb.transportStop.create({
@@ -62,6 +70,8 @@ export async function assignStudentToRoute(studentId: string, routeId: string, s
   const sdb = await getScopedDb();
 
   const route = await sdb.transportRoute.findUniqueOrThrow({ where: { id: routeId }, include: { assignments: true, vehicle: true } });
+  await sdb.student.findUniqueOrThrow({ where: { id: studentId }, select: { id: true } });
+  await sdb.transportStop.findUniqueOrThrow({ where: { id: stopId }, select: { id: true } });
   const alreadyOnThisRoute = route.assignments.some((a) => a.studentId === studentId);
   const capacity = route.vehicle?.capacity ?? null;
   if (!alreadyOnThisRoute && capacity !== null && route.assignments.length >= capacity) {

@@ -37,6 +37,14 @@ export async function createExam(_prevState: ExamFormState, formData: FormData):
   }
 
   const sdb = await getScopedDb();
+
+  // subjectIds are client-supplied — validate every one belongs to this
+  // school before any exam/examSubject rows reference them.
+  const validSubjects = await sdb.subject.findMany({ where: { id: { in: subjectIds } }, select: { id: true } });
+  if (validSubjects.length !== subjectIds.length) {
+    return { error: "One or more selected subjects could not be found." };
+  }
+
   let firstExamId: string | null = null;
 
   for (const classId of classIds) {
@@ -80,9 +88,20 @@ export async function saveMarks(examId: string, marks: Record<string, Record<str
   const exam = await sdb.exam.findUniqueOrThrow({ where: { id: examId }, select: { classId: true } });
   await requireModuleAccess("Exams", "EDIT", exam.classId);
 
+  // examSubjectId/studentId keys come straight from client-submitted marks —
+  // restrict writes to ids that actually belong to this exam/school so a
+  // tampered payload can't attach a Mark to another school's data.
+  const validExamSubjects = await sdb.examSubject.findMany({ where: { examId }, select: { id: true } });
+  const validExamSubjectIds = new Set(validExamSubjects.map((s) => s.id));
+  const studentIds = Object.keys(marks);
+  const validStudents = await sdb.student.findMany({ where: { id: { in: studentIds } }, select: { id: true } });
+  const validStudentIds = new Set(validStudents.map((s) => s.id));
+
   const ops = [];
   for (const [studentId, bySubject] of Object.entries(marks)) {
+    if (!validStudentIds.has(studentId)) continue;
     for (const [examSubjectId, marksObtained] of Object.entries(bySubject)) {
+      if (!validExamSubjectIds.has(examSubjectId)) continue;
       ops.push(
         sdb.mark.upsert({
           where: { examSubjectId_studentId: { examSubjectId, studentId } },
@@ -133,6 +152,7 @@ export async function updateExam(examId: string, fields: UpdateExamFields) {
     if (s.examSubjectId) {
       await sdb.examSubject.update({ where: { id: s.examSubjectId }, data: { maxMarks: s.maxMarks } });
     } else {
+      await sdb.subject.findUniqueOrThrow({ where: { id: s.subjectId }, select: { id: true } });
       await sdb.examSubject.create({
         data: scopedCreateData<Prisma.ExamSubjectUncheckedCreateInput>({ examId, subjectId: s.subjectId, maxMarks: s.maxMarks }),
       });

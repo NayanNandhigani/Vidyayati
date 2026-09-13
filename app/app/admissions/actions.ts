@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { getScopedDb, scopedCreateData } from "@/lib/tenant-db";
 import { requireModuleAccess } from "@/lib/permissions";
+import { enrollStudent } from "@/lib/domain/enrollment";
 
 export type EnquiryFormState = { error?: string };
 
@@ -48,6 +49,8 @@ export async function admitEnquiry(enquiryId: string, classId: string) {
   const sdb = await getScopedDb();
 
   const enquiry = await sdb.admissionEnquiry.findUniqueOrThrow({ where: { id: enquiryId } });
+  if (enquiry.stage === "ADMITTED") throw new Error("This application has already been admitted.");
+  await sdb.class.findUniqueOrThrow({ where: { id: classId }, select: { id: true } });
   const count = await sdb.student.count();
   const admissionNo = `AD-${2000 + count + 1}`;
 
@@ -68,6 +71,8 @@ export async function admitEnquiry(enquiryId: string, classId: string) {
       status: "ACTIVE",
     }),
   });
+
+  await enrollStudent(student.id, classId);
 
   await sdb.admissionEnquiry.update({ where: { id: enquiryId }, data: { stage: "ADMITTED", convertedStudentId: student.id } });
 

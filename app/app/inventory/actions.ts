@@ -129,6 +129,8 @@ export async function createPurchaseOrder(data: {
 }) {
   await guard();
   const sdb = await getScopedDb();
+  await sdb.schoolVendor.findUniqueOrThrow({ where: { id: data.vendorId }, select: { id: true } });
+  if (data.consumableId) await sdb.inventoryConsumable.findUniqueOrThrow({ where: { id: data.consumableId }, select: { id: true } });
   await sdb.purchaseOrder.create({
     data: scopedCreateData<Prisma.PurchaseOrderUncheckedCreateInput>({
       poNumber: data.poNumber.trim(),
