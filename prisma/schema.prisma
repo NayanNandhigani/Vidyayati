@@ -130,6 +130,9 @@ model School {
   exams                Exam[]
   examSubjects         ExamSubject[]
   marks                Mark[]
+  assessmentComponents AssessmentComponent[]
+  examSchedules        ExamSchedule[]
+  studentResults       StudentResult[]
   homework             Homework[]
   homeworkSubmissions  HomeworkSubmission[]
   timetableSlots       TimetableSlot[]
@@ -813,6 +816,7 @@ model StaffProfile {
   salaryComponents   SalaryComponent[]
   leaveRequests      StaffLeaveRequest[]
   wardenOfRooms      HostelRoom[]
+  examInvigilations  ExamSchedule[]
 
   @@index([schoolId])
   @@map("staff_profiles")
@@ -1061,6 +1065,7 @@ model Class {
   @@unique([yearId, grade, section])
   @@index([schoolId])
   @@index([yearId])
+  @@index([academicGradeId])
   @@map("classes")
 }
 
@@ -1187,6 +1192,7 @@ model Student {
   hostelOutingRequests HostelOutingRequest[]
   laundryTickets      LaundryTicket[]
   enrollments         Enrollment[]
+  examResults         StudentResult[]
 
   // Architecture V1, Milestone 4 (item 59): admission numbers are unique
   // per school, not per (admissionNo, classId) — a school-wide identifier
@@ -1446,10 +1452,85 @@ model Exam {
 
   examSubjects ExamSubject[]
   seating      ExamSeating[]
+  results      StudentResult[]
 
   @@index([schoolId])
   @@index([classId])
   @@map("exams")
+}
+
+// A raw Mark is always entered against a whole ExamSubject today — Phase
+// 10's "Written 70% / Internal 20% / Assignment 10%" breakdown is modeled
+// here as additive metadata describing how an ExamSubject's maxMarks is
+// intended to decompose, without changing how Marks are actually entered
+// yet (that would mean adding a componentId to Mark and a partial unique
+// index to allow multiple per-component marks per student/subject — a
+// real schema change, deferred until marks-entry UI actually needs it).
+model AssessmentComponent {
+  id               String      @id @default(cuid())
+  schoolId         String      @map("school_id")
+  school           School      @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  examSubjectId    String      @map("exam_subject_id")
+  examSubject      ExamSubject @relation(fields: [examSubjectId], references: [id], onDelete: Cascade)
+  name             String // e.g. "Written", "Internal", "Assignment"
+  maxMarks         Decimal     @map("max_marks") @db.Decimal(6, 2)
+  passMarks        Decimal?    @map("pass_marks") @db.Decimal(6, 2)
+  weightagePercent Decimal     @map("weightage_percent") @db.Decimal(5, 2)
+
+  @@index([schoolId])
+  @@index([examSubjectId])
+  @@map("assessment_components")
+}
+
+// Per-subject scheduling detail (date/time/room/invigilator) — additive
+// alongside Exam's own startDate/endDate, which stay the source of truth
+// for the exam's overall date range. Not yet exposed in any UI; ready for
+// a future exam-scheduling screen.
+model ExamSchedule {
+  id            String        @id @default(cuid())
+  schoolId      String        @map("school_id")
+  school        School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  examSubjectId String        @unique @map("exam_subject_id")
+  examSubject   ExamSubject   @relation(fields: [examSubjectId], references: [id], onDelete: Cascade)
+  date          DateTime      @db.Date
+  startTime     String        @map("start_time") // "HH:MM"
+  endTime       String        @map("end_time") // "HH:MM"
+  roomId        String?       @map("room_id")
+  room          Room?         @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  invigilatorId String?       @map("invigilator_id")
+  invigilator   StaffProfile? @relation(fields: [invigilatorId], references: [id], onDelete: SetNull)
+
+  @@index([schoolId])
+  @@index([roomId])
+  @@map("exam_schedules")
+}
+
+// Calculated result per student per exam — kept separate from the raw
+// Marks it's derived from (Phase 10 item 100), so a result can be
+// persisted/audited/reported on without recomputing from Marks every
+// time. Computed by lib/domain/exam-results.ts, currently triggered when
+// an exam is approved; existing UI (the Report Card tab, parent result
+// view) still computes this inline from Marks and hasn't been migrated
+// to read from here yet — both stay in sync since they use the same
+// grade-band logic.
+model StudentResult {
+  id         String   @id @default(cuid())
+  schoolId   String   @map("school_id")
+  school     School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  examId     String   @map("exam_id")
+  exam       Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  studentId  String   @map("student_id")
+  student    Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  totalMarks Decimal  @map("total_marks") @db.Decimal(8, 2)
+  maxMarks   Decimal  @map("max_marks") @db.Decimal(8, 2)
+  percentage Decimal  @db.Decimal(5, 2)
+  grade      String?
+  rank       Int?
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@unique([examId, studentId])
+  @@index([schoolId])
+  @@map("student_results")
 }
 
 enum ExamApprovalStatus {
@@ -1468,7 +1549,9 @@ model ExamSubject {
   subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
   maxMarks  Int     @map("max_marks") // e.g. 100
 
-  marks Mark[]
+  marks                Mark[]
+  assessmentComponents AssessmentComponent[]
+  schedule             ExamSchedule?
 
   @@unique([examId, subjectId])
   @@index([schoolId])
@@ -1576,6 +1659,7 @@ model Room {
 
   timetableSlots TimetableSlot[]
   examSeats      ExamSeating[]
+  examSchedules  ExamSchedule[]
 
   @@index([schoolId])
   @@map("rooms")

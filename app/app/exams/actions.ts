@@ -6,6 +6,7 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { getScopedDb, scopedCreateData } from "@/lib/tenant-db";
 import { requireModuleAccess } from "@/lib/permissions";
+import { calculateExamResults } from "@/lib/domain/exam-results";
 
 export type ExamFormState = { error?: string };
 
@@ -90,9 +91,11 @@ export async function saveMarks(examId: string, marks: Record<string, Record<str
 
   // examSubjectId/studentId keys come straight from client-submitted marks —
   // restrict writes to ids that actually belong to this exam/school so a
-  // tampered payload can't attach a Mark to another school's data.
-  const validExamSubjects = await sdb.examSubject.findMany({ where: { examId }, select: { id: true } });
-  const validExamSubjectIds = new Set(validExamSubjects.map((s) => s.id));
+  // tampered payload can't attach a Mark to another school's data. Also
+  // carries maxMarks per subject, used below to reject out-of-range marks
+  // (Phase 10 items 97/98: no negative marks, none over the subject's max).
+  const validExamSubjects = await sdb.examSubject.findMany({ where: { examId }, select: { id: true, maxMarks: true } });
+  const maxMarksByExamSubject = new Map(validExamSubjects.map((s) => [s.id, s.maxMarks]));
   const studentIds = Object.keys(marks);
   const validStudents = await sdb.student.findMany({ where: { id: { in: studentIds } }, select: { id: true } });
   const validStudentIds = new Set(validStudents.map((s) => s.id));
@@ -101,7 +104,9 @@ export async function saveMarks(examId: string, marks: Record<string, Record<str
   for (const [studentId, bySubject] of Object.entries(marks)) {
     if (!validStudentIds.has(studentId)) continue;
     for (const [examSubjectId, marksObtained] of Object.entries(bySubject)) {
-      if (!validExamSubjectIds.has(examSubjectId)) continue;
+      const maxMarks = maxMarksByExamSubject.get(examSubjectId);
+      if (maxMarks === undefined) continue;
+      if (marksObtained < 0 || marksObtained > maxMarks) continue;
       ops.push(
         sdb.mark.upsert({
           where: { examSubjectId_studentId: { examSubjectId, studentId } },
@@ -113,6 +118,7 @@ export async function saveMarks(examId: string, marks: Record<string, Record<str
   }
 
   if (ops.length > 0) await sdb.$transaction(ops);
+  await calculateExamResults(examId);
   revalidatePath("/app/exams");
   return { success: true };
 }
