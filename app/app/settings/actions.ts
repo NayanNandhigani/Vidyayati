@@ -48,11 +48,20 @@ export async function createAcademicYear(_prevState: FormState, formData: FormDa
     return { error: "Label and both dates are required." };
   }
 
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  if (end <= start) return { error: "End date must be after the start date." };
+
+  // Architecture V1, Phase 4, item 40 — an academic year's own date range
+  // shouldn't overlap another year already set up for this school.
+  const overlapping = await sdb.academicYear.findFirst({ where: { startDate: { lt: end }, endDate: { gt: start } } });
+  if (overlapping) return { error: `This date range overlaps the existing academic year "${overlapping.label}".` };
+
   await sdb.academicYear.create({
     data: scopedCreateData<Prisma.AcademicYearUncheckedCreateInput>({
       label: label.trim(),
-      startDate: new Date(startDate),
-      endDate: new Date(endDate),
+      startDate: start,
+      endDate: end,
       isCurrent: false,
     }),
   });

@@ -118,6 +118,7 @@ model School {
   parents              Parent[]
   studentParentLinks   StudentParentLink[]
   academicYears        AcademicYear[]
+  terms                Term[]
   classes              Class[]
   subjects             Subject[]
   classSubjectTeachers ClassSubjectTeacher[]
@@ -934,9 +935,32 @@ model AcademicYear {
   exams            Exam[]
   feeStructures    FeeStructure[]
   classFeeDefaults ClassFeeDefault[]
+  terms            Term[]
 
   @@index([schoolId])
   @@map("academic_years")
+}
+
+// Architecture V1, Milestone 2 — additive: exists alongside AcademicYear,
+// nothing else references it yet. A later milestone (Finance hardening)
+// decides whether FeeStructure.term (currently free text) migrates to a
+// real FK here; that's a deliberate separate step, not bundled with just
+// adding the entity.
+model Term {
+  id        String       @id @default(cuid())
+  schoolId  String       @map("school_id")
+  school    School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  yearId    String       @map("year_id")
+  year      AcademicYear @relation(fields: [yearId], references: [id], onDelete: Cascade)
+  name      String // e.g. "Term 1"
+  startDate DateTime     @map("start_date")
+  endDate   DateTime     @map("end_date")
+  isCurrent Boolean      @default(false) @map("is_current")
+
+  @@unique([yearId, name])
+  @@index([schoolId])
+  @@index([yearId])
+  @@map("terms")
 }
 
 // A school's letter/grade-band scheme (e.g. CBSE-style A1/A2/B1…) for
