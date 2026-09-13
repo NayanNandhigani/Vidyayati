@@ -20,6 +20,7 @@ import {
   IconSchool,
   IconBox,
   IconBed,
+  IconTarget,
 } from "./icons";
 
 export type NavItem = {
@@ -56,6 +57,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: "Exams", href: "/app/exams", icon: IconEdit, module: "Exams", roles: ["SCHOOL_ADMIN", "STAFF", "PARENT"] },
       { label: "Homework", href: "/app/homework", icon: IconBook, module: "Homework", roles: ["SCHOOL_ADMIN", "STAFF", "PARENT"] },
       { label: "Timetable", href: "/app/timetable", icon: IconClock, module: "Timetable", roles: ["SCHOOL_ADMIN", "STAFF", "PARENT"] },
+      { label: "Teaching", href: "/app/teaching", icon: IconTarget, module: "Teaching", roles: ["SCHOOL_ADMIN", "STAFF"] },
     ],
   },
   {

@@ -8,7 +8,7 @@ import { addSalaryComponent, removeSalaryComponent, runStructuredPayroll } from 
 import { updateStaffProfileDetails, createLeaveType, deleteLeaveType, applyForStaffLeave, actOnStaffLeave } from "./hr-depth-actions";
 import PersonDocumentsPanel, { type PersonDocumentRow } from "@/components/PersonDocumentsPanel";
 
-const MODULES = ["Students", "Employees", "Attendance", "Exams", "Homework", "Timetable", "Fees", "Accounts", "Admissions", "Transport", "Library", "Events", "Certificates", "Communication", "Reports"];
+const MODULES = ["Students", "Employees", "Attendance", "Exams", "Homework", "Timetable", "Teaching", "Fees", "Accounts", "Admissions", "Transport", "Library", "Events", "Certificates", "Communication", "Reports"];
 
 // Only these modules act on one class at a time — the rest (Fees, Accounts,
 // Admissions, etc.) don't have a per-class concept, so they only ever get
