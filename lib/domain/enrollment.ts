@@ -1,5 +1,11 @@
 import { Prisma } from "@prisma/client";
-import { getScopedDb, scopedCreateData } from "@/lib/tenant-db";
+import { getScopedDb, scopedCreateData, type ScopedDb } from "@/lib/tenant-db";
+
+// The subset of ScopedDb these functions actually use — deliberately not
+// the full ScopedDb type, since Prisma's interactive-transaction `tx`
+// client (passed in from a caller's own `sdb.$transaction(async (tx) =>
+// ...)`) omits $transaction/$connect/etc. and wouldn't satisfy it.
+type EnrollmentDb = Pick<ScopedDb, "class" | "enrollment">;
 
 /**
  * Ensures a student has an ACTIVE Enrollment row for the academic year
@@ -9,9 +15,15 @@ import { getScopedDb, scopedCreateData } from "@/lib/tenant-db";
  * callers still own that write, same as before Architecture V1
  * Milestone 4; Enrollment is an additive parallel history, not (yet) the
  * source of truth.
+ *
+ * Accepts an optional scoped client — pass the `tx` from a caller's own
+ * `sdb.$transaction(async (tx) => ...)` so student creation/reshuffling
+ * and its enrollment write commit as one atomic operation (Phase 22 item
+ * 182/186); omit it to run standalone with its own client, e.g. from a
+ * one-off script.
  */
-export async function enrollStudent(studentId: string, classId: string, rollNumber?: string | null) {
-  const sdb = await getScopedDb();
+export async function enrollStudent(studentId: string, classId: string, rollNumber?: string | null, db?: EnrollmentDb) {
+  const sdb = db ?? (await getScopedDb());
   const cls = await sdb.class.findUniqueOrThrow({ where: { id: classId }, select: { yearId: true } });
 
   const existing = await sdb.enrollment.findUnique({
@@ -45,8 +57,8 @@ export async function enrollStudent(studentId: string, classId: string, rollNumb
  * same-year reshuffle), it just updates the existing enrollment's class
  * in place — same as calling enrollStudent() directly.
  */
-export async function promoteStudent(studentId: string, toClassId: string, status: "PROMOTED" | "TRANSFERRED" | "WITHDRAWN" = "PROMOTED") {
-  const sdb = await getScopedDb();
+export async function promoteStudent(studentId: string, toClassId: string, status: "PROMOTED" | "TRANSFERRED" | "WITHDRAWN" = "PROMOTED", db?: EnrollmentDb) {
+  const sdb = db ?? (await getScopedDb());
   const toClass = await sdb.class.findUniqueOrThrow({ where: { id: toClassId }, select: { yearId: true } });
 
   const current = await sdb.enrollment.findFirst({ where: { studentId, status: "ACTIVE" }, orderBy: { enrolledOn: "desc" } });
@@ -54,5 +66,5 @@ export async function promoteStudent(studentId: string, toClassId: string, statu
     await sdb.enrollment.update({ where: { id: current.id }, data: { status, endedOn: new Date() } });
   }
 
-  return enrollStudent(studentId, toClassId);
+  return enrollStudent(studentId, toClassId, undefined, sdb);
 }

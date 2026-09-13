@@ -62,19 +62,20 @@ export async function admitEnquiry(enquiryId: string, classId: string) {
   const surname = nameParts.length > 1 ? nameParts.pop()! : "";
   const firstName = nameParts.join(" ");
 
-  const student = await sdb.student.create({
-    data: scopedCreateData<Prisma.StudentUncheckedCreateInput>({
-      firstName,
-      surname,
-      admissionNo,
-      classId,
-      status: "ACTIVE",
-    }),
+  const student = await sdb.$transaction(async (tx) => {
+    const student = await tx.student.create({
+      data: scopedCreateData<Prisma.StudentUncheckedCreateInput>({
+        firstName,
+        surname,
+        admissionNo,
+        classId,
+        status: "ACTIVE",
+      }),
+    });
+    await enrollStudent(student.id, classId, undefined, tx);
+    await tx.admissionEnquiry.update({ where: { id: enquiryId }, data: { stage: "ADMITTED", convertedStudentId: student.id } });
+    return student;
   });
-
-  await enrollStudent(student.id, classId);
-
-  await sdb.admissionEnquiry.update({ where: { id: enquiryId }, data: { stage: "ADMITTED", convertedStudentId: student.id } });
 
   revalidatePath("/app/admissions");
   revalidatePath("/app/students");

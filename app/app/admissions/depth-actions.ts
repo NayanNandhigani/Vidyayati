@@ -107,33 +107,37 @@ export async function approveAdmissionWithFee(
   const surname = nameParts.length > 1 ? nameParts.pop()! : "";
   const firstName = nameParts.join(" ");
 
-  const student = await sdb.student.create({
-    data: scopedCreateData<Prisma.StudentUncheckedCreateInput>({
-      firstName,
-      surname,
-      admissionNo,
-      classId,
-      status: "ACTIVE",
-      dob: enquiry.dob,
-      gender: enquiry.gender,
-      chargedFee,
-    }),
-  });
-  await enrollStudent(student.id, classId);
-
-  if (openingFeeAmount && openingFeeAmount > 0) {
-    await sdb.feeAdjustment.create({
-      data: scopedCreateData<Prisma.FeeAdjustmentUncheckedCreateInput>({
-        studentId: student.id,
-        description: openingFeeDescription?.trim() || "Admission fee",
-        amount: openingFeeAmount,
+  const student = await sdb.$transaction(async (tx) => {
+    const student = await tx.student.create({
+      data: scopedCreateData<Prisma.StudentUncheckedCreateInput>({
+        firstName,
+        surname,
+        admissionNo,
+        classId,
+        status: "ACTIVE",
+        dob: enquiry.dob,
+        gender: enquiry.gender,
+        chargedFee,
       }),
     });
-  }
+    await enrollStudent(student.id, classId, undefined, tx);
 
-  await sdb.admissionEnquiry.update({
-    where: { id: enquiryId },
-    data: { stage: "ADMITTED", convertedStudentId: student.id, approvalStatus: "APPROVED", approvalActionAt: new Date() },
+    if (openingFeeAmount && openingFeeAmount > 0) {
+      await tx.feeAdjustment.create({
+        data: scopedCreateData<Prisma.FeeAdjustmentUncheckedCreateInput>({
+          studentId: student.id,
+          description: openingFeeDescription?.trim() || "Admission fee",
+          amount: openingFeeAmount,
+        }),
+      });
+    }
+
+    await tx.admissionEnquiry.update({
+      where: { id: enquiryId },
+      data: { stage: "ADMITTED", convertedStudentId: student.id, approvalStatus: "APPROVED", approvalActionAt: new Date() },
+    });
+
+    return student;
   });
 
   revalidatePath("/app/admissions");

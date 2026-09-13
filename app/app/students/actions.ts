@@ -43,15 +43,19 @@ export async function createStudent(_prevState: StudentFormState, formData: Form
 
   let student;
   try {
-    student = await sdb.student.create({
-      data: scopedCreateData<Prisma.StudentUncheckedCreateInput>({
-        firstName: firstName.trim(),
-        surname: surname.trim(),
-        admissionNo: admissionNo.trim(),
-        classId,
-        dob: typeof dob === "string" && dob ? new Date(dob) : null,
-        gender: typeof gender === "string" && gender ? (gender as Gender) : null,
-      }),
+    student = await sdb.$transaction(async (tx) => {
+      const student = await tx.student.create({
+        data: scopedCreateData<Prisma.StudentUncheckedCreateInput>({
+          firstName: firstName.trim(),
+          surname: surname.trim(),
+          admissionNo: admissionNo.trim(),
+          classId,
+          dob: typeof dob === "string" && dob ? new Date(dob) : null,
+          gender: typeof gender === "string" && gender ? (gender as Gender) : null,
+        }),
+      });
+      await enrollStudent(student.id, classId, undefined, tx);
+      return student;
     });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
@@ -59,8 +63,6 @@ export async function createStudent(_prevState: StudentFormState, formData: Form
     }
     throw e;
   }
-
-  await enrollStudent(student.id, classId);
 
   revalidatePath("/app/students");
   redirect(`/app/students/${student.id}`);

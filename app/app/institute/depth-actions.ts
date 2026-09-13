@@ -58,10 +58,12 @@ export async function bulkReshuffleStudents(studentIds: string[], targetClassId:
   const schoolId = await requireAdmin();
   await requireFeature(schoolId, "classes.coTeacherAndReshuffle");
   const sdb = await getScopedDb();
-  await sdb.student.updateMany({ where: { id: { in: studentIds } }, data: { classId: targetClassId } });
-  for (const studentId of studentIds) {
-    await enrollStudent(studentId, targetClassId);
-  }
+  await sdb.$transaction(async (tx) => {
+    await tx.student.updateMany({ where: { id: { in: studentIds } }, data: { classId: targetClassId } });
+    for (const studentId of studentIds) {
+      await enrollStudent(studentId, targetClassId, undefined, tx);
+    }
+  });
   revalidatePath("/app/students");
   return { moved: studentIds.length };
 }

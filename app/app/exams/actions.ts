@@ -51,31 +51,40 @@ export async function createExam(_prevState: ExamFormState, formData: FormData):
   for (const classId of classIds) {
     const cls = await sdb.class.findUniqueOrThrow({ where: { id: classId } });
 
-    // Every newly scheduled exam starts PENDING, regardless of who
-    // schedules it (School Admin included) — it only counts as
-    // successfully scheduled once explicitly approved via approveExam.
-    const exam = await sdb.exam.create({
-      data: scopedCreateData<Prisma.ExamUncheckedCreateInput>({
-        name: name.trim(),
-        classId,
-        yearId: cls.yearId,
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
-        approvalStatus: "PENDING",
-      }),
+    // An exam with no subjects yet is a broken intermediate state — the
+    // create and its examSubjects must land together or not at all. Each
+    // class's exam is independent of the others (one sibling Exam per
+    // class, per the design note above), so this transacts per-class
+    // rather than across the whole classIds loop.
+    const examId = await sdb.$transaction(async (tx) => {
+      // Every newly scheduled exam starts PENDING, regardless of who
+      // schedules it (School Admin included) — it only counts as
+      // successfully scheduled once explicitly approved via approveExam.
+      const exam = await tx.exam.create({
+        data: scopedCreateData<Prisma.ExamUncheckedCreateInput>({
+          name: name.trim(),
+          classId,
+          yearId: cls.yearId,
+          startDate: new Date(startDate),
+          endDate: new Date(endDate),
+          approvalStatus: "PENDING",
+        }),
+      });
+
+      await tx.examSubject.createMany({
+        data: subjectIds.map((subjectId) =>
+          scopedCreateData<Prisma.ExamSubjectUncheckedCreateInput>({
+            examId: exam.id,
+            subjectId,
+            maxMarks: Number(formData.get(`maxMarks_${subjectId}`)) || 100,
+          })
+        ),
+      });
+
+      return exam.id;
     });
 
-    await sdb.examSubject.createMany({
-      data: subjectIds.map((subjectId) =>
-        scopedCreateData<Prisma.ExamSubjectUncheckedCreateInput>({
-          examId: exam.id,
-          subjectId,
-          maxMarks: Number(formData.get(`maxMarks_${subjectId}`)) || 100,
-        })
-      ),
-    });
-
-    firstExamId ??= exam.id;
+    firstExamId ??= examId;
   }
 
   revalidatePath("/app/exams");
