@@ -49,12 +49,16 @@ export function NewRoomInlineForm() {
 
 export type RoomFacility = { id: string; type: HostelFacilityType; label: string | null; condition: string | null };
 
+export type RoomBed = { bedNo: string; occupantName: string | null };
+
 export function RoomDetailEditor({
   room,
   facilities,
+  beds,
 }: {
   room: { id: string; roomNo: string; roomSize: string | null; capacity: number; roomType: string | null };
   facilities: RoomFacility[];
+  beds: RoomBed[];
 }) {
   const [pending, startTransition] = useTransition();
   const [roomNo, setRoomNo] = useState(room.roomNo);
@@ -103,6 +107,31 @@ export function RoomDetailEditor({
         </label>
       </div>
       {error && <div style={{ color: "var(--critical)", fontSize: 12 }}>{error}</div>}
+
+      <div style={{ borderTop: "1px solid var(--line)", paddingTop: 14 }}>
+        <div style={{ fontSize: 11, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>Beds</div>
+        {beds.length === 0 ? (
+          <div style={{ fontSize: 12, color: "var(--muted)" }}>No beds set up.</div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 6 }}>
+            {beds.map((b) => (
+              <div
+                key={b.bedNo}
+                style={{
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  fontSize: 11,
+                  background: b.occupantName ? "var(--teal-tint)" : "var(--good-tint)",
+                  color: b.occupantName ? "var(--teal)" : "var(--good)",
+                }}
+              >
+                <div className="mono" style={{ fontWeight: 700 }}>Bed {b.bedNo}</div>
+                <div style={{ marginTop: 2, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{b.occupantName ?? "Available"}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div style={{ borderTop: "1px solid var(--line)", paddingTop: 14 }}>
         <div style={{ fontSize: 11, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>Toilets &amp; showers</div>

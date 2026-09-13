@@ -4,8 +4,11 @@ import { useState, useTransition } from "react";
 import { studentName } from "@/lib/format";
 import { allocateRoom } from "./actions";
 
-export default function AllocateForm({ roomId, students }: { roomId: string; students: { id: string; firstName: string; surname: string }[] }) {
+type AvailableBed = { id: string; bedNo: string };
+
+export default function AllocateForm({ roomId, students, availableBeds }: { roomId: string; students: { id: string; firstName: string; surname: string }[]; availableBeds?: AvailableBed[] }) {
   const [studentId, setStudentId] = useState("");
+  const [bedId, setBedId] = useState("");
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -14,8 +17,9 @@ export default function AllocateForm({ roomId, students }: { roomId: string; stu
     setError(null);
     startTransition(async () => {
       try {
-        await allocateRoom(roomId, studentId);
+        await allocateRoom(roomId, studentId, bedId || undefined);
         setStudentId("");
+        setBedId("");
       } catch (e) {
         setError(e instanceof Error ? e.message : "Could not allocate.");
       }
@@ -34,6 +38,16 @@ export default function AllocateForm({ roomId, students }: { roomId: string; stu
             </option>
           ))}
         </select>
+        {availableBeds && availableBeds.length > 0 && (
+          <select className="in" value={bedId} onChange={(e) => setBedId(e.target.value)}>
+            <option value="">Auto-assign bed</option>
+            {availableBeds.map((b) => (
+              <option key={b.id} value={b.id}>
+                Bed {b.bedNo}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
       {error && <div style={{ color: "var(--critical)", fontSize: 12, marginTop: 6 }}>{error}</div>}
       <span onClick={submit} style={{ display: "block", background: "var(--marigold)", color: "#fff", borderRadius: 8, padding: 9, textAlign: "center", fontSize: 13, fontWeight: 700, marginTop: 10, cursor: pending ? "default" : "pointer", opacity: pending ? 0.7 : 1 }}>

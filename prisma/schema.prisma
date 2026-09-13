@@ -202,6 +202,8 @@ model School {
   hostelFacilities         HostelFacility[]
   hostelMealsServed        HostelMealServed[]
   hostelMaintenanceLogs    HostelMaintenanceLog[]
+  hostelBeds               HostelBed[]
+  hostelAttendance         HostelAttendance[]
   laundryTickets           LaundryTicket[]
   laundryItems             LaundryItem[]
   complianceDocuments      SchoolComplianceDocument[]
@@ -817,6 +819,7 @@ model StaffProfile {
   leaveRequests      StaffLeaveRequest[]
   wardenOfRooms      HostelRoom[]
   examInvigilations  ExamSchedule[]
+  hostelAttendanceMarked HostelAttendance[]
 
   @@index([schoolId])
   @@map("staff_profiles")
@@ -1190,6 +1193,7 @@ model Student {
   feeAdjustments      FeeAdjustment[]
   hostelVisitorLogs   HostelVisitorLog[]
   hostelOutingRequests HostelOutingRequest[]
+  hostelAttendance    HostelAttendance[]
   laundryTickets      LaundryTicket[]
   enrollments         Enrollment[]
   examResults         StudentResult[]
@@ -2188,9 +2192,29 @@ model HostelRoom {
   allocations      HostelAllocation[]
   facilities       HostelFacility[]
   maintenanceLogs  HostelMaintenanceLog[]
+  beds             HostelBed[]
 
   @@index([schoolId])
   @@map("hostel_rooms")
+}
+
+// One row per physical bed in a room — lets allocation and reporting
+// work at bed granularity rather than just room capacity. Every existing
+// room gets backfilled with exactly `capacity` beds; updateRoomDetails
+// keeps bed count in sync when capacity changes (see actions.ts).
+model HostelBed {
+  id       String      @id @default(cuid())
+  schoolId String      @map("school_id")
+  school   School      @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  roomId   String      @map("room_id")
+  room     HostelRoom  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  bedNo    String      @map("bed_no") // e.g. "1", "A" — free text, same convention as roomNo
+
+  allocation HostelAllocation?
+
+  @@unique([roomId, bedNo])
+  @@index([schoolId])
+  @@map("hostel_beds")
 }
 
 enum HostelFacilityType {
@@ -2227,6 +2251,12 @@ model HostelAllocation {
   studentId String     @map("student_id")
   student   Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
   dateFrom  DateTime   @map("date_from")
+
+  // Nullable — a room with no HostelBed rows yet (shouldn't happen after
+  // the backfill, but kept as a safety net) still allocates at the room
+  // level exactly as before this field existed.
+  bedId String?    @unique @map("bed_id")
+  bed   HostelBed? @relation(fields: [bedId], references: [id], onDelete: SetNull)
 
   @@index([schoolId])
   @@index([roomId])
@@ -2301,6 +2331,40 @@ model HostelOutingRequest {
   @@index([schoolId])
   @@index([studentId])
   @@map("hostel_outing_requests")
+}
+
+enum HostelAttendanceSession {
+  MORNING
+  EVENING
+  NIGHT
+}
+
+enum HostelAttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+}
+
+// Residency roll-call — distinct from the academic Attendance model
+// (class attendance) and from HostelOutingRequest (a student leaving on
+// a request); this is the warden marking who's actually in the hostel at
+// a given check of the day.
+model HostelAttendance {
+  id              String                  @id @default(cuid())
+  schoolId        String                  @map("school_id")
+  school          School                  @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  studentId       String                  @map("student_id")
+  student         Student                 @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  date            DateTime                @db.Date
+  session         HostelAttendanceSession
+  status          HostelAttendanceStatus
+  markedByStaffId String?                 @map("marked_by_staff_id")
+  markedByStaff   StaffProfile?           @relation(fields: [markedByStaffId], references: [id])
+
+  @@unique([studentId, date, session])
+  @@index([schoolId])
+  @@index([studentId])
+  @@map("hostel_attendance")
 }
 
 // One row per day+meal actually served — distinct from HostelMessMenu

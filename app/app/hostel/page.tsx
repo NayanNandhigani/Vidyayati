@@ -10,17 +10,26 @@ import { NewRoomInlineForm, RoomDetailEditor } from "./RoomDetailsPanel";
 import { MealsServedLog } from "./MealsPanel";
 import { MaintenancePanel, type MaintenanceTarget, type MaintenanceLogRow } from "./MaintenancePanel";
 import LaundryPanel, { type LaundryStudentOption, type LaundryTicketRow } from "./LaundryPanel";
+import HostelAttendanceRoster from "./HostelAttendanceRoster";
+import { HostelAttendanceReports } from "./HostelAttendanceReports";
+import { getHostelAttendanceSummary } from "./attendance-actions";
 import { removeAllocation } from "./actions";
+import type { HostelAttendanceSession } from "@prisma/client";
 
-const TABS = ["rooms", "allocation", "visitors", "canteen", "maintenance", "laundry"] as const;
+const TABS = ["rooms", "allocation", "attendance", "visitors", "canteen", "maintenance", "laundry"] as const;
 type Tab = (typeof TABS)[number];
-const TAB_LABEL: Record<Tab, string> = { rooms: "Room Details", allocation: "Student Allocation", visitors: "Visitor Entry & Permit", canteen: "Canteen / Mess", maintenance: "Maintenance", laundry: "Laundry Management" };
+const TAB_LABEL: Record<Tab, string> = { rooms: "Room Details", allocation: "Student Allocation", attendance: "Attendance", visitors: "Visitor Entry & Permit", canteen: "Canteen / Mess", maintenance: "Maintenance", laundry: "Laundry Management" };
 
 type RoomsList = Prisma.HostelRoomGetPayload<{
-  include: { allocations: { include: { student: { include: { class: true } } } }; warden: { include: { user: true } }; facilities: true };
+  include: { allocations: { include: { student: { include: { class: true } }; bed: true } }; warden: { include: { user: true } }; facilities: true; beds: { include: { allocation: true } } };
 }>[];
 
-export default async function HostelPage({ searchParams }: { searchParams: Promise<{ tab?: string; room?: string }> }) {
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+export default async function HostelPage({ searchParams }: { searchParams: Promise<{ tab?: string; room?: string; date?: string; session?: string }> }) {
   const session = await auth();
   const sdb = await getScopedDb();
 
@@ -34,7 +43,12 @@ export default async function HostelPage({ searchParams }: { searchParams: Promi
   const tab: Tab = TABS.includes(params.tab as Tab) ? (params.tab as Tab) : "rooms";
 
   const rooms = await sdb.hostelRoom.findMany({
-    include: { allocations: { include: { student: { include: { class: true } } } }, warden: { include: { user: true } }, facilities: true },
+    include: {
+      allocations: { include: { student: { include: { class: true } }, bed: true } },
+      warden: { include: { user: true } },
+      facilities: true,
+      beds: { include: { allocation: true } },
+    },
     orderBy: { roomNo: "asc" },
   });
 
@@ -74,6 +88,8 @@ export default async function HostelPage({ searchParams }: { searchParams: Promi
         <RoomsTab rooms={rooms} selectedId={selected?.id} canEdit={canEdit} />
       ) : tab === "allocation" ? (
         <AllocationTab rooms={rooms} selectedId={selected?.id} canEdit={canEdit} sdb={sdb} />
+      ) : tab === "attendance" ? (
+        await AttendanceTab({ date: params.date ?? todayISO(), session: (params.session as HostelAttendanceSession) ?? "MORNING", canEdit, sdb })
       ) : tab === "visitors" ? (
         await VisitorsTab({ rooms, sdb })
       ) : tab === "canteen" ? (
@@ -122,7 +138,16 @@ function RoomsTab({ rooms, selectedId, canEdit }: { rooms: RoomsList; selectedId
       <div className="card" style={{ padding: 22, overflowY: "auto" }}>
         {canEdit ? (
           selected ? (
-            <RoomDetailEditor room={{ id: selected.id, roomNo: selected.roomNo, roomSize: selected.roomSize, capacity: selected.capacity, roomType: selected.roomType }} facilities={selected.facilities.map((f) => ({ id: f.id, type: f.type, label: f.label, condition: f.condition }))} />
+            <RoomDetailEditor
+              room={{ id: selected.id, roomNo: selected.roomNo, roomSize: selected.roomSize, capacity: selected.capacity, roomType: selected.roomType }}
+              facilities={selected.facilities.map((f) => ({ id: f.id, type: f.type, label: f.label, condition: f.condition }))}
+              beds={[...selected.beds]
+                .sort((a, b) => Number(a.bedNo) - Number(b.bedNo) || a.bedNo.localeCompare(b.bedNo))
+                .map((b) => {
+                  const occupant = selected.allocations.find((a) => a.bedId === b.id);
+                  return { bedNo: b.bedNo, occupantName: occupant ? studentName(occupant.student) : null };
+                })}
+            />
           ) : (
             <NewRoomInlineForm />
           )
@@ -187,7 +212,13 @@ async function AllocationTab({ rooms, selectedId, canEdit, sdb }: { rooms: Rooms
       <div className="card" style={{ padding: 22, display: "flex", flexDirection: "column", gap: 14, overflowY: "auto" }}>
         {selected ? (
           <>
-            {canEdit && <AllocateForm roomId={selected.id} students={unassignedStudents} />}
+            {canEdit && (
+              <AllocateForm
+                roomId={selected.id}
+                students={unassignedStudents}
+                availableBeds={selected.beds.filter((b) => !b.allocation).map((b) => ({ id: b.id, bedNo: b.bedNo })).sort((a, b) => Number(a.bedNo) - Number(b.bedNo) || a.bedNo.localeCompare(b.bedNo))}
+              />
+            )}
             {canEdit && (
               <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12 }}>
                 <div style={{ fontSize: 11.5, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Warden</div>
@@ -209,7 +240,10 @@ async function AllocationTab({ rooms, selectedId, canEdit, sdb }: { rooms: Rooms
                   {selected.allocations.map((a) => (
                     <div key={a.studentId} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                       <div>
-                        <div style={{ fontSize: 13, fontWeight: 700 }}>{studentName(a.student)}</div>
+                        <div style={{ fontSize: 13, fontWeight: 700 }}>
+                          {studentName(a.student)}
+                          {a.bed && <span className="mono" style={{ fontWeight: 600, color: "var(--muted)", marginLeft: 8, fontSize: 11.5 }}>Bed {a.bed.bedNo}</span>}
+                        </div>
                         <div style={{ fontSize: 12, color: "var(--muted)", margin: "2px 0 4px" }}>
                           Class {a.student.class.grade}-{a.student.class.section}
                         </div>
@@ -234,6 +268,25 @@ async function AllocationTab({ rooms, selectedId, canEdit, sdb }: { rooms: Rooms
           <div style={{ color: "var(--muted)", fontSize: 13.5 }}>No room selected.</div>
         )}
       </div>
+    </div>
+  );
+}
+
+async function AttendanceTab({ date, session, canEdit, sdb }: { date: string; session: HostelAttendanceSession; canEdit: boolean; sdb: Awaited<ReturnType<typeof getScopedDb>> }) {
+  const [allocations, existing, summary] = await Promise.all([
+    sdb.hostelAllocation.findMany({ include: { student: true, room: true, bed: true }, orderBy: { student: { firstName: "asc" } } }),
+    sdb.hostelAttendance.findMany({ where: { date: new Date(`${date}T00:00:00`), session } }),
+    getHostelAttendanceSummary(),
+  ]);
+
+  const residents = allocations.map((a) => ({ id: a.studentId, firstName: a.student.firstName, surname: a.student.surname, roomNo: a.room.roomNo, bedNo: a.bed?.bedNo ?? null }));
+  const initialMarks: Record<string, "PRESENT" | "ABSENT" | "LATE"> = {};
+  for (const e of existing) initialMarks[e.studentId] = e.status;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, flex: 1, minHeight: 0, overflowY: "auto" }}>
+      <HostelAttendanceRoster date={date} session={session} residents={residents} initialMarks={initialMarks} canEdit={canEdit} />
+      <HostelAttendanceReports absentToday={summary.absentToday} summary={summary.summary} />
     </div>
   );
 }
@@ -327,8 +380,9 @@ async function ParentHostelView() {
         include: {
           student: {
             include: {
-              hostelAllocations: { include: { room: true }, orderBy: { dateFrom: "desc" }, take: 1 },
+              hostelAllocations: { include: { room: true, bed: true }, orderBy: { dateFrom: "desc" }, take: 1 },
               hostelOutingRequests: { orderBy: { requestedAt: "desc" }, take: 5 },
+              hostelAttendance: { orderBy: { date: "desc" }, take: 15 },
             },
           },
         },
@@ -348,7 +402,28 @@ async function ParentHostelView() {
           <div style={{ fontSize: 15.5, fontWeight: 700, marginBottom: 14 }}>{studentName(s)}</div>
           {s.hostelAllocations[0] ? (
             <>
-              <div style={{ fontSize: 13, color: "var(--muted)" }}>Hostel room: <b style={{ color: "var(--ink)" }}>{s.hostelAllocations[0].room.roomNo}</b></div>
+              <div style={{ fontSize: 13, color: "var(--muted)" }}>
+                Hostel room: <b style={{ color: "var(--ink)" }}>{s.hostelAllocations[0].room.roomNo}</b>
+                {s.hostelAllocations[0].bed && <> · Bed <b style={{ color: "var(--ink)" }}>{s.hostelAllocations[0].bed.bedNo}</b></>}
+              </div>
+              {s.hostelAttendance.length > 0 && (
+                <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(15,1fr)", gap: 4 }}>
+                  {[...s.hostelAttendance].reverse().map((a) => {
+                    const style =
+                      a.status === "PRESENT"
+                        ? { bg: "var(--good-tint)", fg: "var(--good)", mark: "P" }
+                        : a.status === "ABSENT"
+                          ? { bg: "var(--critical-tint)", fg: "var(--critical)", mark: "A" }
+                          : { bg: "var(--warn-tint)", fg: "var(--warn)", mark: "L" };
+                    return (
+                      <div key={a.id} title={`${a.session} — ${a.date.toLocaleDateString("en-IN")}`} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, borderRadius: 6, padding: "6px 0", background: style.bg, color: style.fg }}>
+                        <span className="mono" style={{ fontSize: 10, fontWeight: 700 }}>{a.date.getDate()}</span>
+                        <span style={{ fontSize: 8, fontWeight: 700 }}>{style.mark}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {s.hostelOutingRequests.length > 0 && (
                 <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
                   {s.hostelOutingRequests.map((r) => {
