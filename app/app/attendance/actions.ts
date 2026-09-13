@@ -27,12 +27,13 @@ export async function saveAttendance(classId: string, date: string, marks: Recor
     validMarks.map(([studentId, status]) =>
       sdb.attendance.upsert({
         where: { studentId_date: { studentId, date: d } },
-        update: { status, markedByStaffId: staffProfile?.id ?? null },
+        update: { status, markedByStaffId: staffProfile?.id ?? null, classId },
         create: scopedCreateData<Prisma.AttendanceUncheckedCreateInput>({
           studentId,
           date: d,
           status,
           markedByStaffId: staffProfile?.id ?? null,
+          classId,
         }),
       })
     )

@@ -1056,6 +1056,7 @@ model Class {
   subjectTeachers  ClassSubjectTeacher[]
   coTeachers       ClassCoTeacher[]
   enrollments      Enrollment[]
+  attendance       Attendance[]
 
   @@unique([yearId, grade, section])
   @@index([schoolId])
@@ -1309,9 +1310,19 @@ model Attendance {
   markedByStaffId String?          @map("marked_by_staff_id")
   markedByStaff   StaffProfile?    @relation("AttendanceMarkedBy", fields: [markedByStaffId], references: [id])
 
+  // The class this attendance was actually recorded against, stamped at
+  // write time — kept separate from Student.classId (which only reflects
+  // the student's *current* class) so a later promotion/reshuffle doesn't
+  // silently rewrite which class old attendance appears to belong to.
+  // Nullable/SetNull because it's an additive backfilled field, not (yet)
+  // load-bearing for any existing query.
+  classId String? @map("class_id")
+  class   Class?  @relation(fields: [classId], references: [id], onDelete: SetNull)
+
   @@unique([studentId, date])
   @@index([schoolId])
   @@index([studentId])
+  @@index([classId])
   @@map("attendance")
 }
 
