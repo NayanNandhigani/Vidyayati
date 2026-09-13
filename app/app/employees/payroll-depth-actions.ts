@@ -69,34 +69,35 @@ export async function runStructuredPayroll(staffId: string, month: string) {
 
   const net = Math.max(0, gross - pf - esi - tds - pt - lop);
 
-  await sdb.payrollRun.upsert({
-    where: { staffId_month: { staffId, month } },
-    update: { amount: net, status: "PAID", paidOn: new Date(), grossAmount: gross, pfAmount: pf, esiAmount: esi, tdsAmount: tds, ptAmount: pt, lopAmount: lop || null },
-    create: scopedCreateData<Prisma.PayrollRunUncheckedCreateInput>({
-      staffId,
-      month,
-      amount: net,
-      status: "PAID",
-      paidOn: new Date(),
-      grossAmount: gross,
-      pfAmount: pf,
-      esiAmount: esi,
-      tdsAmount: tds,
-      ptAmount: pt,
-      lopAmount: lop || null,
+  await sdb.$transaction([
+    sdb.payrollRun.upsert({
+      where: { staffId_month: { staffId, month } },
+      update: { amount: net, status: "PAID", paidOn: new Date(), grossAmount: gross, pfAmount: pf, esiAmount: esi, tdsAmount: tds, ptAmount: pt, lopAmount: lop || null },
+      create: scopedCreateData<Prisma.PayrollRunUncheckedCreateInput>({
+        staffId,
+        month,
+        amount: net,
+        status: "PAID",
+        paidOn: new Date(),
+        grossAmount: gross,
+        pfAmount: pf,
+        esiAmount: esi,
+        tdsAmount: tds,
+        ptAmount: pt,
+        lopAmount: lop || null,
+      }),
     }),
-  });
-
-  await sdb.accountsTransaction.create({
-    data: scopedCreateData<Prisma.AccountsTransactionUncheckedCreateInput>({
-      date: new Date(),
-      description: `Staff salary — ${staff.user.name} (${month})`,
-      category: "Payroll",
-      source: "AUTO_PAYROLL",
-      type: "EXPENSE",
-      amount: net,
+    sdb.accountsTransaction.create({
+      data: scopedCreateData<Prisma.AccountsTransactionUncheckedCreateInput>({
+        date: new Date(),
+        description: `Staff salary — ${staff.user.name} (${month})`,
+        category: "Payroll",
+        source: "AUTO_PAYROLL",
+        type: "EXPENSE",
+        amount: net,
+      }),
     }),
-  });
+  ]);
 
   revalidatePath(`/app/employees/${staffId}`);
   revalidatePath("/app/accounts");

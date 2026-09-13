@@ -43,6 +43,10 @@ export async function recordPayment(_prevState: PaymentFormState, formData: Form
   }
 
   const alreadyPaid = target.payments.reduce((s, p) => s + Number(p.amount), 0);
+  const remaining = Number(target.amount) - alreadyPaid;
+  if (amount > remaining) {
+    return { error: `This payment exceeds the outstanding balance for this installment (₹${remaining.toFixed(2)} remaining).` };
+  }
   const status = alreadyPaid + amount >= Number(target.amount) ? "PAID" : "PARTIAL";
 
   await sdb.$transaction([

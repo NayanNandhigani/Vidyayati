@@ -121,22 +121,23 @@ export async function runPayroll(staffId: string, month: string, amount: number)
 
   const staff = await sdb.staffProfile.findUniqueOrThrow({ where: { id: staffId }, include: { user: true } });
 
-  const run = await sdb.payrollRun.upsert({
-    where: { staffId_month: { staffId, month } },
-    update: { amount, status: "PAID", paidOn: new Date() },
-    create: scopedCreateData<Prisma.PayrollRunUncheckedCreateInput>({ staffId, month, amount, status: "PAID", paidOn: new Date() }),
-  });
-
-  await sdb.accountsTransaction.create({
-    data: scopedCreateData<Prisma.AccountsTransactionUncheckedCreateInput>({
-      date: new Date(),
-      description: `Staff salary — ${staff.user.name} (${month})`,
-      category: "Payroll",
-      source: "AUTO_PAYROLL",
-      type: "EXPENSE",
-      amount,
+  const [run] = await sdb.$transaction([
+    sdb.payrollRun.upsert({
+      where: { staffId_month: { staffId, month } },
+      update: { amount, status: "PAID", paidOn: new Date() },
+      create: scopedCreateData<Prisma.PayrollRunUncheckedCreateInput>({ staffId, month, amount, status: "PAID", paidOn: new Date() }),
     }),
-  });
+    sdb.accountsTransaction.create({
+      data: scopedCreateData<Prisma.AccountsTransactionUncheckedCreateInput>({
+        date: new Date(),
+        description: `Staff salary — ${staff.user.name} (${month})`,
+        category: "Payroll",
+        source: "AUTO_PAYROLL",
+        type: "EXPENSE",
+        amount,
+      }),
+    }),
+  ]);
 
   revalidatePath(`/app/employees/${staffId}`);
   revalidatePath("/app/accounts");

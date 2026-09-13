@@ -240,17 +240,21 @@ export async function createSale(consumerName: string, lines: SaleLine[]): Promi
   const totalAmount = saleLines.reduce((s, l) => s + l.lineTotal, 0);
   const soldAt = new Date();
 
-  const sale = await sdb.inventorySale.create({
-    data: scopedCreateData<Prisma.InventorySaleUncheckedCreateInput>({ consumerName: consumerName.trim(), totalAmount, soldAt }),
-  });
+  // The sale row itself, its line items, the stock decrements, and the
+  // accounting entry all need to land together or not at all — an
+  // interactive transaction (rather than the array form) since the sale's
+  // own id is needed by the writes that follow it.
+  const sale = await sdb.$transaction(async (tx) => {
+    const sale = await tx.inventorySale.create({
+      data: scopedCreateData<Prisma.InventorySaleUncheckedCreateInput>({ consumerName: consumerName.trim(), totalAmount, soldAt }),
+    });
 
-  const ops: Prisma.PrismaPromise<unknown>[] = [
-    sdb.inventorySaleItem.createMany({
+    await tx.inventorySaleItem.createMany({
       data: saleLines.map((l) =>
         scopedCreateData<Prisma.InventorySaleItemUncheckedCreateInput>({ saleId: sale.id, stockItemId: l.stockItemId, quantity: l.quantity, unitPrice: l.unitPrice, lineTotal: l.lineTotal })
       ),
-    }),
-    sdb.accountsTransaction.create({
+    });
+    await tx.accountsTransaction.create({
       data: scopedCreateData<Prisma.AccountsTransactionUncheckedCreateInput>({
         date: soldAt,
         description: `Sale to ${consumerName.trim()} — ${saleLines.map((l) => l.name).join(", ")}`,
@@ -259,17 +263,16 @@ export async function createSale(consumerName: string, lines: SaleLine[]): Promi
         type: "INCOME",
         amount: totalAmount,
       }),
-    }),
-  ];
-  for (const l of saleLines) {
-    ops.push(
-      sdb.inventoryStockItemMovement.create({
+    });
+    for (const l of saleLines) {
+      await tx.inventoryStockItemMovement.create({
         data: scopedCreateData<Prisma.InventoryStockItemMovementUncheckedCreateInput>({ stockItemId: l.stockItemId, type: "OUT", quantity: l.quantity, note: `Sold to ${consumerName.trim()}` }),
-      }),
-      sdb.inventoryStockItem.update({ where: { id: l.stockItemId }, data: { quantityOnHand: { decrement: l.quantity } } })
-    );
-  }
-  await sdb.$transaction(ops);
+      });
+      await tx.inventoryStockItem.update({ where: { id: l.stockItemId }, data: { quantityOnHand: { decrement: l.quantity } } });
+    }
+
+    return sale;
+  });
 
   revalidatePath("/app/inventory");
   revalidatePath("/app/accounts");

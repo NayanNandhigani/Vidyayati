@@ -23,18 +23,28 @@ export async function recordSubscriptionPayment(_prevState: PaymentFormState, fo
   const normalizedReferenceNo = typeof referenceNo === "string" && referenceNo ? referenceNo : null;
 
   const alreadyPaid = invoice.payments.reduce((s, p) => s + Number(p.amount), 0);
+  const remaining = Number(invoice.amount) - alreadyPaid;
+  if (amount > remaining) {
+    return { error: `This payment exceeds the outstanding balance on this invoice (₹${remaining.toFixed(2)} remaining).` };
+  }
   const newStatus = alreadyPaid + amount >= Number(invoice.amount) ? "PAID" : "PENDING";
 
-  const payment = await db.subscriptionPayment.create({
-    data: { invoiceId, amount, method, referenceNo: normalizedReferenceNo, paidOn },
-  });
-  await db.$transaction([
-    db.subscriptionInvoice.update({ where: { id: invoiceId }, data: { status: newStatus } }),
-    ...(newStatus === "PAID" ? [db.school.update({ where: { id: invoice.schoolId }, data: { status: "ACTIVE" as const } })] : []),
+  // The payment row's id feeds the ledger entry below, so this needs the
+  // interactive transaction form rather than the array form — otherwise a
+  // failure after the payment insert would leave an orphaned
+  // SubscriptionPayment with no invoice-status update and no ledger entry.
+  await db.$transaction(async (tx) => {
+    const payment = await tx.subscriptionPayment.create({
+      data: { invoiceId, amount, method, referenceNo: normalizedReferenceNo, paidOn },
+    });
+    await tx.subscriptionInvoice.update({ where: { id: invoiceId }, data: { status: newStatus } });
+    if (newStatus === "PAID") {
+      await tx.school.update({ where: { id: invoice.schoolId }, data: { status: "ACTIVE" as const } });
+    }
     // Mirrors into the platform ledger so subscription income shows up in
     // Accounts without the Super Admin having to enter it twice — same
     // pattern as AccountsTransaction.source: AUTO_FEES at the school level.
-    db.ledgerEntry.create({
+    await tx.ledgerEntry.create({
       data: {
         entryType: "INCOME",
         ledgerAccountId: "la-subscription-revenue",
@@ -46,8 +56,8 @@ export async function recordSubscriptionPayment(_prevState: PaymentFormState, fo
         source: "AUTO_SUBSCRIPTION",
         subscriptionPaymentId: payment.id,
       },
-    }),
-  ]);
+    });
+  });
 
   revalidatePath("/super-admin/subscriptions");
   revalidatePath("/super-admin/schools");
