@@ -119,6 +119,7 @@ model School {
   studentParentLinks   StudentParentLink[]
   academicYears        AcademicYear[]
   terms                Term[]
+  academicGrades       AcademicGrade[]
   classes              Class[]
   subjects             Subject[]
   classSubjectTeachers ClassSubjectTeacher[]
@@ -936,6 +937,7 @@ model AcademicYear {
   feeStructures    FeeStructure[]
   classFeeDefaults ClassFeeDefault[]
   terms            Term[]
+  academicGrades   AcademicGrade[]
 
   @@index([schoolId])
   @@map("academic_years")
@@ -1003,6 +1005,30 @@ model GradeBand {
   @@map("grade_bands")
 }
 
+// Architecture V1, Milestone 3 — additive, grouping layer above Class (a
+// Class row is really one *section*, e.g. "6-B"). Named AcademicGrade
+// rather than bare "Grade" to avoid reading as the same concept as
+// GradeScale/GradeBand above (exam letter-grading — completely
+// unrelated). Class.grade (free text) stays the source of truth for now;
+// academicGradeId is an optional, backfilled parallel link, not a
+// replacement — see the migration for how existing Class rows were
+// grouped into one AcademicGrade per distinct (year, grade label).
+model AcademicGrade {
+  id       String       @id @default(cuid())
+  schoolId String       @map("school_id")
+  school   School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  yearId   String       @map("year_id")
+  year     AcademicYear @relation(fields: [yearId], references: [id], onDelete: Cascade)
+  name     String // e.g. "6" — matches Class.grade for the same year
+  sequence Int? // optional ordering hint (1 for Grade 1, 11 for Grade 11) for sorting beyond string comparison
+
+  classes Class[]
+
+  @@unique([yearId, name])
+  @@index([schoolId])
+  @@map("academic_grades")
+}
+
 model Class {
   id                  String        @id @default(cuid())
   schoolId            String        @map("school_id")
@@ -1010,6 +1036,8 @@ model Class {
   yearId              String        @map("year_id")
   year                AcademicYear  @relation(fields: [yearId], references: [id], onDelete: Cascade)
   grade               String // e.g. "6"
+  academicGradeId     String?        @map("academic_grade_id")
+  academicGrade       AcademicGrade? @relation(fields: [academicGradeId], references: [id], onDelete: SetNull)
   section             String // e.g. "B"
   classTeacherStaffId String?       @map("class_teacher_staff_id")
   classTeacher        StaffProfile? @relation("ClassTeacher", fields: [classTeacherStaffId], references: [id])
