@@ -14,6 +14,7 @@ export async function registerLaundry(studentId: string, items: LaundryItemInput
   if (cleanItems.length === 0) throw new Error("Add at least one clothing item.");
 
   const sdb = await getScopedDb();
+  await sdb.student.findUniqueOrThrow({ where: { id: studentId }, select: { id: true } });
   const count = await sdb.laundryTicket.count();
   const tokenNo = `LT-${1000 + count + 1}`;
 

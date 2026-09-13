@@ -9,6 +9,8 @@ import { requireModuleAccess } from "@/lib/permissions";
 export async function markTransportEvent(studentId: string, routeId: string, date: string, event: "pickup" | "drop") {
   await requireModuleAccess("Transport", "EDIT");
   const sdb = await getScopedDb();
+  await sdb.student.findUniqueOrThrow({ where: { id: studentId }, select: { id: true } });
+  await sdb.transportRoute.findUniqueOrThrow({ where: { id: routeId }, select: { id: true } });
   const now = new Date();
   const field = event === "pickup" ? "pickupAt" : "dropAt";
 

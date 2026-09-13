@@ -11,6 +11,8 @@ export async function addMaintenanceLog(target: { roomId?: string; facilityId?: 
   if (!target.roomId && !target.facilityId) throw new Error("Pick a room or a facility.");
   if (!description.trim()) throw new Error("Description is required.");
   const sdb = await getScopedDb();
+  if (target.roomId) await sdb.hostelRoom.findUniqueOrThrow({ where: { id: target.roomId }, select: { id: true } });
+  if (target.facilityId) await sdb.hostelFacility.findUniqueOrThrow({ where: { id: target.facilityId }, select: { id: true } });
   await sdb.hostelMaintenanceLog.create({
     data: scopedCreateData<Prisma.HostelMaintenanceLogUncheckedCreateInput>({
       roomId: target.roomId ?? null,

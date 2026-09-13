@@ -18,6 +18,7 @@ async function guard() {
 export async function updateRoomTypeAndWarden(roomId: string, roomType: string | null, wardenStaffId: string | null) {
   await guard();
   const sdb = await getScopedDb();
+  if (wardenStaffId) await sdb.staffProfile.findUniqueOrThrow({ where: { id: wardenStaffId }, select: { id: true } });
   await sdb.hostelRoom.update({ where: { id: roomId }, data: { roomType, wardenStaffId } });
   revalidatePath("/app/hostel");
 }
@@ -37,6 +38,7 @@ export async function upsertMessMenu(dayOfWeek: number, mealType: MealType, menu
 export async function addVisitorLog(studentId: string, visitorName: string, relation: string | null, purpose: string | null) {
   await guard();
   const sdb = await getScopedDb();
+  await sdb.student.findUniqueOrThrow({ where: { id: studentId }, select: { id: true } });
   await sdb.hostelVisitorLog.create({
     data: scopedCreateData<Prisma.HostelVisitorLogUncheckedCreateInput>({ studentId, visitorName: visitorName.trim(), relation, purpose }),
   });

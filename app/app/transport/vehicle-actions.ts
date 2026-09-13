@@ -99,6 +99,7 @@ export async function addVehicleLog(vehicleId: string, type: VehicleLogType, dat
   await requireModuleAccess("Transport", "EDIT");
   if (!date || !description.trim()) throw new Error("Date and description are required.");
   const sdb = await getScopedDb();
+  await sdb.transportVehicle.findUniqueOrThrow({ where: { id: vehicleId }, select: { id: true } });
   await sdb.vehicleLog.create({
     data: scopedCreateData<Prisma.VehicleLogUncheckedCreateInput>({ vehicleId, type, date: new Date(date), description: description.trim(), cost, odometerReading }),
   });
@@ -120,6 +121,7 @@ export async function addVehicleDocument(vehicleId: string, category: string, fo
   await requireModuleAccess("Transport", "EDIT");
   const session = await auth();
   const sdb = await getScopedDb();
+  await sdb.transportVehicle.findUniqueOrThrow({ where: { id: vehicleId }, select: { id: true } });
 
   const file = formData.get("file");
   const expiryDate = formData.get("expiryDate");
