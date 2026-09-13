@@ -22,22 +22,28 @@ export const AUDITED_MODELS = new Set([
   "Mark",
   "Student",
   "FeePayment",
+  "FeeDiscount",
+  "FeeAdjustment",
   "AccountsTransaction",
   "StaffPermission",
   "PayrollRun",
   "Attendance",
   "HostelAllocation",
+  "Exam",
 ]);
 
 export const AUDITED_MODEL_LABEL: Record<string, string> = {
   Mark: "Mark",
   Student: "Student",
   FeePayment: "Fee Payment",
+  FeeDiscount: "Fee Discount",
+  FeeAdjustment: "Fee Adjustment",
   AccountsTransaction: "Accounts Transaction",
   StaffPermission: "Staff Permission",
   PayrollRun: "Payroll Run",
   Attendance: "Attendance",
   HostelAllocation: "Hostel Allocation",
+  Exam: "Exam",
 };
 
 const FILTER_BY_WHERE_OPS = new Set([
