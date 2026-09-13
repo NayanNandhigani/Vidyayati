@@ -8,13 +8,15 @@ import { getStaffLeaveSummary } from "../hr-depth-actions";
 import StaffDetailTabs from "../StaffDetailTabs";
 import Avatar from "@/components/Avatar";
 import ProfilePhotoUpload from "@/components/ProfilePhotoUpload";
+import SetupLinkBanner from "@/components/SetupLinkBanner";
 import { setStaffPhoto } from "../../settings/id-card-actions";
 
-export default async function StaffProfilePage({ params }: { params: Promise<{ id: string }> }) {
+export default async function StaffProfilePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ setupToken?: string }> }) {
   await requireModuleAccess("Employees", "VIEW");
   const session = await auth();
   const isAdmin = session!.user.role === "SCHOOL_ADMIN";
   const { id } = await params;
+  const { setupToken } = await searchParams;
   const sdb = await getScopedDb();
 
   const selected = await sdb.staffProfile.findFirst({ where: { id }, include: { user: true } });
@@ -65,6 +67,8 @@ export default async function StaffProfilePage({ params }: { params: Promise<{ i
           ← Back to Employees
         </Link>
       </div>
+
+      {setupToken && <SetupLinkBanner token={setupToken} />}
 
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
         <div style={{ position: "relative" }}>

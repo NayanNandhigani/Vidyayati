@@ -2,7 +2,6 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import bcrypt from "bcryptjs";
 import type { SchoolStatus, SchoolDocumentCategory } from "@prisma/client";
 import { db } from "@/lib/db";
 import { auth } from "@/auth";
@@ -10,6 +9,7 @@ import { requirePlatformModuleAccess } from "@/lib/permissions";
 import { saveUploadedFile, deleteUploadedFile } from "@/lib/storage";
 import { readAddress, readContactAddress } from "@/lib/address";
 import { FEATURE_KEYS, type FeatureKey } from "@/lib/feature-flags";
+import { createPendingAccount } from "@/lib/account-setup";
 
 const AADHAR_PATTERN = /^\d{12}$/;
 
@@ -26,7 +26,6 @@ const MAX_UPLOAD_BYTES = 15 * 1024 * 1024; // 15MB
 export type SchoolFormState = { error?: string };
 export type ManageFormState = { error?: string; success?: boolean };
 
-const DEFAULT_PASSWORD = "12345";
 const VALID_STATUSES: SchoolStatus[] = ["TRIAL", "ACTIVE", "EXPIRING", "OVERDUE", "CANCELLED"];
 
 export async function generateSchoolCode(name: string): Promise<string> {
@@ -78,7 +77,7 @@ export async function onboardSchool(_prevState: SchoolFormState, formData: FormD
   const sameAsSchoolAddress = formData.get("sameAsSchoolAddress") === "on";
   const contactAddress = sameAsSchoolAddress ? address : readContactAddress(formData);
 
-  const passwordHash = await bcrypt.hash(DEFAULT_PASSWORD, 10);
+  const { token, setupTokenHash, setupTokenExpiresAt, placeholderHash } = await createPendingAccount();
   const code = await generateSchoolCode(name.trim());
 
   let school;
@@ -100,7 +99,9 @@ export async function onboardSchool(_prevState: SchoolFormState, formData: FormD
           create: {
             name: adminName.trim(),
             username,
-            passwordHash,
+            passwordHash: placeholderHash,
+            setupTokenHash,
+            setupTokenExpiresAt,
             role: "SCHOOL_ADMIN",
           },
         },
@@ -131,7 +132,7 @@ export async function onboardSchool(_prevState: SchoolFormState, formData: FormD
   }
 
   revalidatePath("/super-admin/schools");
-  redirect(`/super-admin/schools/${school.id}`);
+  redirect(`/super-admin/schools/${school.id}?setupToken=${token}`);
 }
 
 export async function updateSchool(_prevState: ManageFormState, formData: FormData): Promise<ManageFormState> {

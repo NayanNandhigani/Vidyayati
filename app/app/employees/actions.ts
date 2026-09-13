@@ -2,16 +2,14 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import bcrypt from "bcryptjs";
 import { Prisma, AccessLevel } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getScopedDb, scopedCreateData } from "@/lib/tenant-db";
 import { requireModuleAccess } from "@/lib/permissions";
 import { auth } from "@/auth";
+import { createPendingAccount } from "@/lib/account-setup";
 
 export type StaffFormState = { error?: string };
-
-const DEFAULT_PASSWORD = "12345";
 
 export async function createStaff(_prevState: StaffFormState, formData: FormData): Promise<StaffFormState> {
   const session = await auth();
@@ -41,7 +39,7 @@ export async function createStaff(_prevState: StaffFormState, formData: FormData
     }
   }
 
-  const passwordHash = await bcrypt.hash(DEFAULT_PASSWORD, 10);
+  const { token, setupTokenHash, setupTokenExpiresAt, placeholderHash } = await createPendingAccount();
 
   const user = await sdb.user.create({
     data: scopedCreateData<Prisma.UserUncheckedCreateInput>({
@@ -49,7 +47,9 @@ export async function createStaff(_prevState: StaffFormState, formData: FormData
       username: normalizedUsername,
       phone: typeof phone === "string" && phone ? phone : null,
       role: "STAFF",
-      passwordHash,
+      passwordHash: placeholderHash,
+      setupTokenHash,
+      setupTokenExpiresAt,
     }),
   });
 
@@ -64,7 +64,7 @@ export async function createStaff(_prevState: StaffFormState, formData: FormData
   });
 
   revalidatePath("/app/employees");
-  redirect(`/app/employees/${staff.id}`);
+  redirect(`/app/employees/${staff.id}?setupToken=${token}`);
 }
 
 export async function cyclePermission(staffId: string, moduleName: string, classId: string | null = null) {

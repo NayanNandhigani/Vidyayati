@@ -2,12 +2,12 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import bcrypt from "bcryptjs";
 import type { LeadSource, LeadStage, SalesActivityType } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requirePlatformModuleAccess } from "@/lib/permissions";
 import { generateSchoolCode } from "@/app/super-admin/schools/actions";
 import { readAddress, readContactAddress } from "@/lib/address";
+import { createPendingAccount } from "@/lib/account-setup";
 
 const AADHAR_PATTERN = /^\d{12}$/;
 function validateAadhar(formData: FormData): string | null | "INVALID" {
@@ -20,7 +20,6 @@ function validateAadhar(formData: FormData): string | null | "INVALID" {
 export type LeadFormState = { error?: string };
 export type FormState = { error?: string; success?: boolean };
 
-const DEFAULT_PASSWORD = "12345";
 const VALID_SOURCES: LeadSource[] = ["REFERRAL", "WEBSITE", "COLD_OUTREACH", "EVENT", "OTHER"];
 // Forward path a lead moves through via "Move ->" — LOST is a separate
 // terminal action (markLeadLost), not part of this sequence.
@@ -154,7 +153,7 @@ export async function convertToSchool(_prevState: FormState, formData: FormData)
   const sameAsSchoolAddress = formData.get("sameAsSchoolAddress") === "on";
   const contactAddress = sameAsSchoolAddress ? lead : readContactAddress(formData);
 
-  const passwordHash = await bcrypt.hash(DEFAULT_PASSWORD, 10);
+  const { token, setupTokenHash, setupTokenExpiresAt, placeholderHash } = await createPendingAccount();
   const code = await generateSchoolCode(lead.schoolNameProposed);
 
   let school;
@@ -172,7 +171,7 @@ export async function convertToSchool(_prevState: FormState, formData: FormData)
         state: lead.state,
         country: lead.country,
         postalCode: lead.postalCode,
-        users: { create: { name: adminName.trim(), username, passwordHash, role: "SCHOOL_ADMIN" } },
+        users: { create: { name: adminName.trim(), username, passwordHash: placeholderHash, setupTokenHash, setupTokenExpiresAt, role: "SCHOOL_ADMIN" } },
         contactPerson: {
           create: {
             name: lead.contactName,
@@ -220,5 +219,5 @@ export async function convertToSchool(_prevState: FormState, formData: FormData)
 
   revalidatePath("/super-admin/leads");
   revalidatePath("/super-admin/schools");
-  redirect(`/super-admin/schools/${school.id}`);
+  redirect(`/super-admin/schools/${school.id}?setupToken=${token}`);
 }

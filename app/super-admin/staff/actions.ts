@@ -2,16 +2,14 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import bcrypt from "bcryptjs";
 import { AccessLevel } from "@prisma/client";
 import { db } from "@/lib/db";
 import { auth } from "@/auth";
 import { PLATFORM_MODULES } from "@/lib/platform-modules";
+import { createPendingAccount } from "@/lib/account-setup";
 
 export type StaffFormState = { error?: string };
 export type FormState = { error?: string; success?: boolean };
-
-const DEFAULT_PASSWORD = "12345";
 
 async function requireSuperAdmin() {
   const session = await auth();
@@ -39,7 +37,7 @@ export async function createPlatformStaff(_prevState: StaffFormState, formData: 
   const existing = await db.user.findUnique({ where: { username: normalizedUsername } });
   if (existing) return { error: "A user with this username already exists." };
 
-  const passwordHash = await bcrypt.hash(DEFAULT_PASSWORD, 10);
+  const { token, setupTokenHash, setupTokenExpiresAt, placeholderHash } = await createPendingAccount();
 
   const user = await db.user.create({
     data: {
@@ -47,7 +45,9 @@ export async function createPlatformStaff(_prevState: StaffFormState, formData: 
       username: normalizedUsername,
       phone: typeof phone === "string" && phone ? phone : null,
       role: "PLATFORM_STAFF",
-      passwordHash,
+      passwordHash: placeholderHash,
+      setupTokenHash,
+      setupTokenExpiresAt,
       platformStaffProfile: {
         create: {
           title: typeof title === "string" && title ? title : null,
@@ -60,7 +60,7 @@ export async function createPlatformStaff(_prevState: StaffFormState, formData: 
   });
 
   revalidatePath("/super-admin/staff");
-  redirect(`/super-admin/staff?staff=${user.id}`);
+  redirect(`/super-admin/staff?staff=${user.id}&setupToken=${token}`);
 }
 
 export async function cyclePlatformPermission(staffId: string, moduleName: string) {

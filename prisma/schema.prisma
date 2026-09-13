@@ -703,6 +703,16 @@ model User {
   role               UserRole
   status             UserStatus @default(ACTIVE)
   mustChangePassword Boolean    @default(true) @map("must_change_password")
+  // Account-setup invitation (Architecture V1, Milestone 1) — replaces the
+  // old "every account defaults to password 12345" pattern. A freshly
+  // created account's passwordHash is an unusable random placeholder;
+  // setupTokenHash is the SHA-256 of a one-time token shown to the
+  // creating admin exactly once (see lib/account-setup.ts), never stored
+  // in plaintext. Both null once setup completes or for any account that
+  // predates this (e.g. seeded demo users, which intentionally keep their
+  // known password for local-dev convenience).
+  setupTokenHash       String?   @unique @map("setup_token_hash")
+  setupTokenExpiresAt  DateTime? @map("setup_token_expires_at")
   lastLoginAt        DateTime?  @map("last_login_at")
   createdAt          DateTime   @default(now()) @map("created_at")
   updatedAt          DateTime   @updatedAt @map("updated_at")

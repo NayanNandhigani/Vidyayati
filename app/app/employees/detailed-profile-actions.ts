@@ -2,16 +2,14 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import bcrypt from "bcryptjs";
 import { Prisma, Gender } from "@prisma/client";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { getScopedDb, scopedCreateData } from "@/lib/tenant-db";
 import { requireModuleAccess } from "@/lib/permissions";
 import { requireFeature } from "@/lib/feature-flags";
+import { createPendingAccount } from "@/lib/account-setup";
 import type { StaffFormState } from "./actions";
-
-const DEFAULT_PASSWORD = "12345";
 
 function str(formData: FormData, key: string): string | null {
   const v = formData.get(key);
@@ -41,7 +39,7 @@ export async function createStaffDetailed(_prevState: StaffFormState, formData: 
     }
   }
 
-  const passwordHash = await bcrypt.hash(DEFAULT_PASSWORD, 10);
+  const { token, setupTokenHash, setupTokenExpiresAt, placeholderHash } = await createPendingAccount();
   const gender = str(formData, "gender");
   const dob = str(formData, "dob");
   const yearsOfExperience = str(formData, "yearsOfExperience");
@@ -52,7 +50,9 @@ export async function createStaffDetailed(_prevState: StaffFormState, formData: 
       username: normalizedUsername,
       phone: str(formData, "mobilePrimary"),
       role: "STAFF",
-      passwordHash,
+      passwordHash: placeholderHash,
+      setupTokenHash,
+      setupTokenExpiresAt,
     }),
   });
 
@@ -99,7 +99,7 @@ export async function createStaffDetailed(_prevState: StaffFormState, formData: 
   });
 
   revalidatePath("/app/employees");
-  redirect(`/app/employees/${staff.id}`);
+  redirect(`/app/employees/${staff.id}?setupToken=${token}`);
 }
 
 export async function suggestEmployeeId(): Promise<string> {

@@ -17,6 +17,7 @@ import FeatureAccessGrid from "./FeatureAccessGrid";
 import SchoolBillingPanel, { type SchoolInvoiceRow } from "./SchoolBillingPanel";
 import AccessControlPanel from "./AccessControlPanel";
 import SchoolGroupField from "./SchoolGroupField";
+import SetupLinkBanner from "@/components/SetupLinkBanner";
 
 const STATUS_STYLE: Record<string, { bg: string; fg: string; label: string }> = {
   ACTIVE: { bg: "var(--good-tint)", fg: "var(--good)", label: "Active" },
@@ -28,10 +29,11 @@ const STATUS_STYLE: Record<string, { bg: string; fg: string; label: string }> = 
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
-export default async function SchoolProfilePage({ params }: { params: Promise<{ id: string }> }) {
+export default async function SchoolProfilePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ setupToken?: string }> }) {
   const access = await requirePlatformModuleAccess("Schools", "VIEW");
   const canManage = access === "EDIT";
   const { id } = await params;
+  const { setupToken } = await searchParams;
 
   const school = await db.school.findUnique({
     where: { id },
@@ -141,6 +143,8 @@ export default async function SchoolProfilePage({ params }: { params: Promise<{ 
           ← Back to Schools
         </Link>
       </div>
+
+      {setupToken && <SetupLinkBanner token={setupToken} />}
 
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
         <div>

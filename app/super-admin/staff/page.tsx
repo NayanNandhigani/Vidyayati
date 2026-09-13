@@ -6,9 +6,10 @@ import { initials } from "@/lib/format";
 import { avatarColorFor } from "@/lib/academic";
 import NewPlatformStaffForm from "./NewPlatformStaffForm";
 import PlatformStaffDetail, { type PlatformStaffRow } from "./PlatformStaffDetail";
+import SetupLinkBanner from "@/components/SetupLinkBanner";
 import type { AccessLevel } from "@prisma/client";
 
-export default async function StaffPage({ searchParams }: { searchParams: Promise<{ staff?: string; new?: string }> }) {
+export default async function StaffPage({ searchParams }: { searchParams: Promise<{ staff?: string; new?: string; setupToken?: string }> }) {
   await requirePlatformModuleAccess("Staff", "VIEW");
   const session = await auth();
   const params = await searchParams;
@@ -43,6 +44,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
 
   return (
     <div style={{ padding: "28px 36px", display: "flex", flexDirection: "column", gap: 18, height: "100dvh", boxSizing: "border-box" }}>
+      {params.setupToken && <SetupLinkBanner token={params.setupToken} />}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div className="disp" style={{ fontSize: 22 }}>
