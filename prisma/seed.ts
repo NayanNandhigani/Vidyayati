@@ -103,6 +103,18 @@ async function wipeExistingSchools() {
 }
 
 async function main() {
+  // This script wipes every existing School row (see wipeExistingSchools())
+  // and recreates ~400 accounts all sharing the password "12345" — exactly
+  // the two things that must never happen to a real production database.
+  // Require an explicit opt-in there rather than relying on nobody ever
+  // running `npm run db:seed` by mistake against a deployed DATABASE_URL.
+  if (process.env.NODE_ENV === "production" && process.env.ALLOW_PROD_SEED !== "true") {
+    throw new Error(
+      "Refusing to run prisma/seed.ts against a production environment — it wipes all existing schools and creates demo accounts with the password \"12345\". " +
+        "If you really mean to (e.g. a fresh, not-yet-live deployment), set ALLOW_PROD_SEED=true and re-run."
+    );
+  }
+
   const now = new Date();
   const passwordHash = await bcrypt.hash(DEFAULT_PASSWORD, 10);
 
