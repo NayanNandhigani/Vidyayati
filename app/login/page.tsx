@@ -1,5 +1,12 @@
 import LoginForm from "./LoginForm";
 
+// Never statically prerender/cache this page. A cached login response
+// (Next's default s-maxage=31536000 for static pages) can get stuck at
+// an edge/proxy layer for up to a year — including a response captured
+// during an outage (e.g. a transient auth misconfiguration) — and a
+// redeploy only refreshes the container's own build, not that cache.
+export const dynamic = "force-dynamic";
+
 export default function LoginPage() {
   return (
     <main
