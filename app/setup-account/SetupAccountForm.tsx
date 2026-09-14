@@ -13,7 +13,7 @@ export default function SetupAccountForm({ token }: { token: string }) {
 
   useEffect(() => {
     if (state.success) {
-      const t = setTimeout(() => router.push("/login"), 1400);
+      const t = setTimeout(() => router.push("/signin"), 1400);
       return () => clearTimeout(t);
     }
   }, [state.success, router]);

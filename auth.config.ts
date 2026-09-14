@@ -7,7 +7,7 @@ import type { NextAuthConfig } from "next-auth";
 // handlers and server components, which run in the Node.js runtime.
 export const authConfig: NextAuthConfig = {
   session: { strategy: "jwt" },
-  pages: { signIn: "/login" },
+  pages: { signIn: "/signin" },
   trustHost: true,
   providers: [],
   callbacks: {

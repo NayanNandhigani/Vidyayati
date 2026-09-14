@@ -24,7 +24,7 @@ const NAV: { label: string; href: string; icon: typeof IconHome; module?: Platfo
 export default async function SuperAdminLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
   if (!session?.user || (session.user.role !== "SUPER_ADMIN" && session.user.role !== "PLATFORM_STAFF")) {
-    redirect("/login");
+    redirect("/signin");
   }
 
   // SUPER_ADMIN sees every module; PLATFORM_STAFF only the ones they have

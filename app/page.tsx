@@ -64,7 +64,7 @@ export default function MarketingHome() {
             Pricing
           </a>
           <Link
-            href="/login"
+            href="/signin"
             style={{ background: "var(--marigold)", color: "#0a0e1a", borderRadius: 8, padding: "8px 18px", fontWeight: 700, textDecoration: "none" }}
           >
             Sign in
@@ -101,7 +101,7 @@ export default function MarketingHome() {
             Vidya Yati replaces the spreadsheets and paper registers with a single platform your admin office, teachers, and parents actually want to use.
           </p>
           <div style={{ display: "flex", gap: 14, justifyContent: "center", flexWrap: "wrap" }}>
-            <Link href="/login" style={{ background: "var(--marigold)", color: "#0a0e1a", borderRadius: 10, padding: "13px 26px", fontWeight: 700, fontSize: 14.5, textDecoration: "none" }}>
+            <Link href="/signin" style={{ background: "var(--marigold)", color: "#0a0e1a", borderRadius: 10, padding: "13px 26px", fontWeight: 700, fontSize: 14.5, textDecoration: "none" }}>
               Sign in to your school
             </Link>
             <a
@@ -198,7 +198,7 @@ export default function MarketingHome() {
           <a href="mailto:hello@vidyayati.in" style={{ color: "#aeb8d6", textDecoration: "none" }}>
             hello@vidyayati.in
           </a>
-          <Link href="/login" style={{ color: "#aeb8d6", textDecoration: "none" }}>
+          <Link href="/signin" style={{ color: "#aeb8d6", textDecoration: "none" }}>
             Sign in
           </Link>
         </div>

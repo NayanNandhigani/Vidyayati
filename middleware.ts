@@ -15,7 +15,7 @@ export default auth((req) => {
   const isAppRoute = nextUrl.pathname.startsWith("/app");
 
   if (!isLoggedIn && (isSuperAdminRoute || isAppRoute)) {
-    const redirectUrl = new URL("/login", nextUrl);
+    const redirectUrl = new URL("/signin", nextUrl);
     redirectUrl.searchParams.set("callbackUrl", nextUrl.pathname);
     return NextResponse.redirect(redirectUrl);
   }

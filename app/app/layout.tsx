@@ -12,7 +12,7 @@ import type { Prisma } from "@prisma/client";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
   if (!session?.user || !session.user.schoolId) {
-    redirect("/login");
+    redirect("/signin");
   }
 
   const school = await db.school.findUniqueOrThrow({
