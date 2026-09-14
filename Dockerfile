@@ -19,6 +19,11 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/prisma ./prisma
 COPY . .
+# This project has no /public directory — mkdir -p is a no-op if one ever
+# gets added, but without it the runner stage's `COPY --from=builder
+# /app/public ./public` fails outright (Docker COPY requires the source
+# path to exist).
+RUN mkdir -p ./public
 RUN npx prisma generate
 RUN npm run build
 
