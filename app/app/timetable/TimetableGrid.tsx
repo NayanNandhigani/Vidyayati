@@ -4,11 +4,12 @@ import { useState, useTransition } from "react";
 import type { DayOfWeek } from "@prisma/client";
 import { subjectStyleFor as styleFor } from "@/lib/academic";
 import { setTimetableSlot } from "./actions";
+import { setTimetableSlotWithRoom } from "./depth-actions";
 
 const DAYS: DayOfWeek[] = ["MON", "TUE", "WED", "THU", "FRI", "SAT"];
 const PERIODS = [1, 2, 3, 4, 5, 6, 7, 8];
 
-type Slot = { subjectId: string; subjectName: string; staffId: string; staffName: string };
+type Slot = { subjectId: string; subjectName: string; staffId: string; staffName: string; roomId: string | null; roomName: string | null };
 type Grid = Record<number, Partial<Record<DayOfWeek, Slot>>>;
 
 export default function TimetableGrid({
@@ -18,6 +19,8 @@ export default function TimetableGrid({
   staff,
   todayCol,
   canEdit,
+  rooms,
+  showRooms,
 }: {
   classId: string;
   grid: Grid;
@@ -25,17 +28,39 @@ export default function TimetableGrid({
   staff: { id: string; name: string }[];
   todayCol: number;
   canEdit: boolean;
+  rooms: { id: string; name: string }[];
+  showRooms: boolean;
 }) {
   const [grid, setGrid] = useState(initialGrid);
   const [editing, setEditing] = useState<{ period: number; day: DayOfWeek } | null>(null);
+  const [conflictError, setConflictError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
-  function save(period: number, day: DayOfWeek, subjectId: string, staffId: string) {
+  function save(period: number, day: DayOfWeek, subjectId: string, staffId: string, roomId: string) {
     const subject = subjects.find((s) => s.id === subjectId);
     const staffMember = staff.find((s) => s.id === staffId);
+    const room = rooms.find((r) => r.id === roomId);
+    setConflictError(null);
+
+    if (showRooms) {
+      startTransition(async () => {
+        const res = await setTimetableSlotWithRoom(classId, day, period, subjectId || null, staffId || null, roomId || null);
+        if (res.error) {
+          setConflictError(res.error);
+          return;
+        }
+        setGrid((prev) => ({
+          ...prev,
+          [period]: { ...prev[period], [day]: subject && staffMember ? { subjectId, subjectName: subject.name, staffId, staffName: staffMember.name, roomId: roomId || null, roomName: room?.name ?? null } : undefined },
+        }));
+        setEditing(null);
+      });
+      return;
+    }
+
     setGrid((prev) => ({
       ...prev,
-      [period]: { ...prev[period], [day]: subject && staffMember ? { subjectId, subjectName: subject.name, staffId, staffName: staffMember.name } : undefined },
+      [period]: { ...prev[period], [day]: subject && staffMember ? { subjectId, subjectName: subject.name, staffId, staffName: staffMember.name, roomId: null, roomName: null } : undefined },
     }));
     setEditing(null);
     startTransition(async () => {
@@ -74,15 +99,22 @@ export default function TimetableGrid({
                   <CellEditor
                     subjects={subjects}
                     staff={staff}
+                    rooms={rooms}
+                    showRooms={showRooms}
                     initial={slot}
-                    onSave={(subjectId, staffId) => save(period, day, subjectId, staffId)}
-                    onCancel={() => setEditing(null)}
+                    error={conflictError}
+                    onSave={(subjectId, staffId, roomId) => save(period, day, subjectId, staffId, roomId)}
+                    onCancel={() => {
+                      setEditing(null);
+                      setConflictError(null);
+                    }}
                   />
                 ) : slot ? (
                   <div style={{ borderRadius: 7, padding: "6px 8px", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", gap: 2, background: style!.bg }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: style!.fg }}>{slot.subjectName}</div>
                     <div className="mono" style={{ fontSize: 9, color: style!.fg, opacity: 0.75 }}>
                       {slot.staffName}
+                      {slot.roomName && ` · ${slot.roomName}`}
                     </div>
                   </div>
                 ) : (
@@ -102,21 +134,28 @@ export default function TimetableGrid({
 function CellEditor({
   subjects,
   staff,
+  rooms,
+  showRooms,
   initial,
+  error,
   onSave,
   onCancel,
 }: {
   subjects: { id: string; name: string }[];
   staff: { id: string; name: string }[];
+  rooms: { id: string; name: string }[];
+  showRooms: boolean;
   initial?: Slot;
-  onSave: (subjectId: string, staffId: string) => void;
+  error: string | null;
+  onSave: (subjectId: string, staffId: string, roomId: string) => void;
   onCancel: () => void;
 }) {
   const [subjectId, setSubjectId] = useState(initial?.subjectId ?? "");
   const [staffId, setStaffId] = useState(initial?.staffId ?? "");
+  const [roomId, setRoomId] = useState(initial?.roomId ?? "");
 
   return (
-    <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", gap: 3, background: "#fff", border: "1px solid var(--marigold)", borderRadius: 7, padding: 5 }}>
+    <div data-testid="timetable-cell-editor" onClick={(e) => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", gap: 3, background: "#fff", border: "1px solid var(--marigold)", borderRadius: 7, padding: 5, minWidth: showRooms ? 110 : undefined }}>
       <select value={subjectId} onChange={(e) => setSubjectId(e.target.value)} style={{ fontSize: 10, padding: 2 }}>
         <option value="">Subject…</option>
         {subjects.map((s) => (
@@ -133,12 +172,23 @@ function CellEditor({
           </option>
         ))}
       </select>
+      {showRooms && (
+        <select value={roomId} onChange={(e) => setRoomId(e.target.value)} style={{ fontSize: 10, padding: 2 }}>
+          <option value="">Room…</option>
+          {rooms.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.name}
+            </option>
+          ))}
+        </select>
+      )}
+      {error && <div style={{ fontSize: 9, color: "var(--critical)", fontWeight: 600, lineHeight: 1.3 }}>{error}</div>}
       <div style={{ display: "flex", gap: 4 }}>
-        <button onClick={() => onSave(subjectId, staffId)} style={{ flex: 1, fontSize: 9.5, fontWeight: 700, background: "var(--marigold)", color: "#fff", border: "none", borderRadius: 4, padding: "3px 0", cursor: "pointer" }}>
+        <button onClick={() => onSave(subjectId, staffId, roomId)} style={{ flex: 1, fontSize: 9.5, fontWeight: 700, background: "var(--marigold)", color: "#fff", border: "none", borderRadius: 4, padding: "3px 0", cursor: "pointer" }}>
           Save
         </button>
         <button
-          onClick={() => (initial ? onSave("", "") : onCancel())}
+          onClick={() => (initial ? onSave("", "", "") : onCancel())}
           style={{ flex: 1, fontSize: 9.5, fontWeight: 600, background: "var(--line)", border: "none", borderRadius: 4, padding: "3px 0", cursor: "pointer" }}
         >
           {initial ? "Clear" : "Cancel"}

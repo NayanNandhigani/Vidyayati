@@ -11,10 +11,6 @@ import { requireModuleAccess } from "@/lib/permissions";
 export type HomeworkFormState = { error?: string };
 
 export async function createHomework(_prevState: HomeworkFormState, formData: FormData): Promise<HomeworkFormState> {
-  await requireModuleAccess("Homework", "EDIT");
-  const session = await auth();
-  const sdb = await getScopedDb();
-
   const title = formData.get("title");
   const description = formData.get("description");
   const classId = formData.get("classId");
@@ -30,6 +26,10 @@ export async function createHomework(_prevState: HomeworkFormState, formData: Fo
     return { error: "Title, class, subject, and due date are required." };
   }
 
+  await requireModuleAccess("Homework", "EDIT", classId);
+  const session = await auth();
+  const sdb = await getScopedDb();
+
   const staffProfile =
     session!.user.role === "STAFF" ? await db.staffProfile.findUnique({ where: { userId: session!.user.id } }) : null;
 
@@ -37,15 +37,31 @@ export async function createHomework(_prevState: HomeworkFormState, formData: Fo
     return { error: "Staff profile not found." };
   }
 
-  // School Admins assigning homework directly need a staff record to attribute
-  // it to; fall back to the class's own class teacher if the admin has none.
+  // classId/subjectId are client-supplied form fields — validate they
+  // belong to this school before anything gets created against them.
+  const cls = await sdb.class.findUnique({ where: { id: classId } });
+  if (!cls) return { error: "That class could not be found." };
+  const subject = await sdb.subject.findUnique({ where: { id: subjectId }, select: { id: true } });
+  if (!subject) return { error: "That subject could not be found." };
+
+  // A Staff member's own homework is always attributed to themselves. A
+  // School Admin has no staff record of their own, so the form asks them
+  // to pick which teacher it should show as — defaulting to the class's
+  // own class teacher when one is set, but not requiring it (many schools
+  // haven't assigned class teachers to every section).
   let staffId = staffProfile?.id;
   if (!staffId) {
-    const cls = await sdb.class.findUnique({ where: { id: classId } });
-    staffId = cls?.classTeacherStaffId ?? undefined;
+    const submittedStaffId = formData.get("staffId");
+    if (typeof submittedStaffId === "string" && submittedStaffId) {
+      const submittedStaff = await sdb.staffProfile.findUnique({ where: { id: submittedStaffId }, select: { id: true } });
+      if (!submittedStaff) return { error: "That teacher could not be found." };
+      staffId = submittedStaffId;
+    } else {
+      staffId = cls.classTeacherStaffId ?? undefined;
+    }
   }
   if (!staffId) {
-    return { error: "This class has no class teacher assigned to attribute the homework to." };
+    return { error: "Select which teacher this assignment should be attributed to." };
   }
 
   const homework = await sdb.homework.create({
@@ -73,9 +89,9 @@ export async function createHomework(_prevState: HomeworkFormState, formData: Fo
 }
 
 export async function cycleSubmissionStatus(submissionId: string) {
-  await requireModuleAccess("Homework", "EDIT");
   const sdb = await getScopedDb();
-  const sub = await sdb.homeworkSubmission.findUniqueOrThrow({ where: { id: submissionId } });
+  const sub = await sdb.homeworkSubmission.findUniqueOrThrow({ where: { id: submissionId }, include: { assignment: { select: { classId: true } } } });
+  await requireModuleAccess("Homework", "EDIT", sub.assignment.classId);
 
   const cycle: SubmissionStatus[] = ["PENDING", "SUBMITTED", "LATE"];
   const next = cycle[(cycle.indexOf(sub.status) + 1) % cycle.length];
@@ -90,17 +106,18 @@ export async function cycleSubmissionStatus(submissionId: string) {
 }
 
 export async function setSubmissionScore(submissionId: string, score: number) {
-  await requireModuleAccess("Homework", "EDIT");
   const sdb = await getScopedDb();
+  const sub = await sdb.homeworkSubmission.findUniqueOrThrow({ where: { id: submissionId }, include: { assignment: { select: { classId: true } } } });
+  await requireModuleAccess("Homework", "EDIT", sub.assignment.classId);
   await sdb.homeworkSubmission.update({ where: { id: submissionId }, data: { score } });
   revalidatePath("/app/homework");
 }
 
 export async function remindPending(assignmentId: string) {
-  await requireModuleAccess("Homework", "EDIT");
   const sdb = await getScopedDb();
 
   const homework = await sdb.homework.findUniqueOrThrow({ where: { id: assignmentId } });
+  await requireModuleAccess("Homework", "EDIT", homework.classId);
   const pending = await sdb.homeworkSubmission.findMany({ where: { assignmentId, status: "PENDING" } });
 
   if (pending.length === 0) return { remindedCount: 0 };

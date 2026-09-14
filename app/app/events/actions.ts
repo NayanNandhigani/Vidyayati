@@ -41,6 +41,7 @@ export async function createEvent(_prevState: FormState, formData: FormData): Pr
 export async function addChecklistItem(eventId: string, task: string) {
   await requireModuleAccess("Events", "EDIT");
   const sdb = await getScopedDb();
+  await sdb.event.findUniqueOrThrow({ where: { id: eventId }, select: { id: true } });
   await sdb.eventChecklistItem.create({
     data: scopedCreateData<Prisma.EventChecklistItemUncheckedCreateInput>({ eventId, task }),
   });

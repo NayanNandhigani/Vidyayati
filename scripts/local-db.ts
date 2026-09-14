@@ -33,12 +33,21 @@ async function main() {
   await pg.start();
   console.log(`Local Postgres is running on port ${PORT}.`);
 
-  try {
-    await pg.createDatabase(DATABASE_NAME);
-    console.log(`Created database "${DATABASE_NAME}".`);
-  } catch {
-    // Already exists — fine.
+  // embedded-postgres's initdb doesn't expose a locale/encoding option — on
+  // Windows it defaults the whole cluster to the OS codepage (WIN1252), which
+  // can't store characters outside it (₹, emoji, some names). Rather than
+  // pg.createDatabase() (CREATE DATABASE with no options, inheriting that
+  // default), create this one database explicitly as UTF8/C-locale off
+  // template0 — a database's encoding is fixed at creation and can't be
+  // ALTERed later, so this only has to happen once.
+  const client = pg.getPgClient();
+  await client.connect();
+  const exists = await client.query("SELECT 1 FROM pg_database WHERE datname = $1", [DATABASE_NAME]);
+  if (exists.rowCount === 0) {
+    await client.query(`CREATE DATABASE ${client.escapeIdentifier(DATABASE_NAME)} WITH TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'`);
+    console.log(`Created database "${DATABASE_NAME}" (UTF8).`);
   }
+  await client.end();
 
   console.log(`DATABASE_URL=postgresql://${USER}:${PASSWORD}@localhost:${PORT}/${DATABASE_NAME}`);
   console.log("Local database ready. Leave this process running while you work; Ctrl+C to stop it.");

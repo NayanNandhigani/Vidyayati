@@ -1,9 +1,12 @@
 import { auth } from "@/auth";
 import { getScopedDb } from "@/lib/tenant-db";
 import { requireModuleAccess } from "@/lib/permissions";
-import { formatINR } from "@/lib/format";
+import { formatINR, studentName } from "@/lib/format";
 import { feeStatusFor, FEE_STATUS_STYLE } from "@/lib/academic";
+import { hasFeature } from "@/lib/feature-flags";
+import { computeDiscountAmount, computeLateFine } from "@/lib/fees";
 import FeesView from "./FeesView";
+import FeeSettingsPanel from "./FeeSettingsPanel";
 
 export default async function FeesPage() {
   const session = await auth();
@@ -14,7 +17,7 @@ export default async function FeesPage() {
   }
 
   const accessLevel = await requireModuleAccess("Fees", "VIEW");
-  const canEdit = accessLevel === "EDIT" || accessLevel === "FULL";
+  const canEdit = accessLevel === "EDIT";
 
   const currentYear = await sdb.academicYear.findFirst({ where: { isCurrent: true } });
   const structures = currentYear ? await sdb.feeStructure.findMany({ where: { yearId: currentYear.id } }) : [];
@@ -23,25 +26,51 @@ export default async function FeesPage() {
 
   const students = await sdb.student.findMany({
     where: { status: "ACTIVE" },
-    include: { class: true, feePayments: { orderBy: { paidOn: "desc" } } },
-    orderBy: { name: "asc" },
+    include: { class: true, feePayments: { orderBy: { paidOn: "desc" } }, feeDiscounts: true, feeAdjustments: { orderBy: { addedOn: "desc" } } },
+    orderBy: [{ firstName: "asc" }, { surname: "asc" }],
   });
+
+  const [showDiscounts, showGst, school] = await Promise.all([
+    hasFeature(session!.user.schoolId, "fees.discountsAndFines"),
+    hasFeature(session!.user.schoolId, "fees.gstReceipts"),
+    sdb.school.findUnique({ where: { id: session!.user.schoolId! }, select: { feeLateFinePerDay: true, feeLateFineGraceDays: true, gstNumber: true, gstRatePercent: true } }),
+  ]);
 
   const rows = students.map((s) => {
     const classStructures = structuresByClass.get(s.classId) ?? [];
     const total = classStructures.reduce((sum, fs) => sum + Number(fs.amount), 0);
     const paid = s.feePayments.reduce((sum, p) => sum + Number(p.amount), 0);
-    const pending = Math.max(0, total - paid);
-    const hasOverdue = classStructures.some((fs) => fs.dueDate < new Date()) && paid < total;
+
+    const discountAmount = showDiscounts
+      ? computeDiscountAmount(total, s.feeDiscounts.map((d) => ({ valueType: d.valueType, value: Number(d.value) })))
+      : 0;
+    const lateFine = showDiscounts
+      ? computeLateFine(
+          classStructures.map((fs) => ({ amount: Number(fs.amount), dueDate: fs.dueDate, paid: s.feePayments.filter((p) => p.feeStructureId === fs.id).reduce((sm, p) => sm + Number(p.amount), 0) })),
+          school?.feeLateFinePerDay ? Number(school.feeLateFinePerDay) : null,
+          school?.feeLateFineGraceDays ?? null
+        )
+      : 0;
+
+    const adjustmentAmount = s.feeAdjustments.reduce((sum, a) => sum + Number(a.amount), 0);
+    const netTotal = Math.max(0, total - discountAmount + lateFine + adjustmentAmount);
+    const pending = Math.max(0, netTotal - paid);
+    const hasOverdue = classStructures.some((fs) => fs.dueDate < new Date()) && paid < netTotal;
     return {
       id: s.id,
-      name: s.name,
+      name: studentName(s),
       className: `${s.class.grade}-${s.class.section}`,
-      total,
+      classId: s.classId,
+      total: netTotal,
       paid,
       pending,
-      status: feeStatusFor(total, paid, hasOverdue),
+      discountAmount,
+      lateFine,
+      adjustmentAmount,
+      status: feeStatusFor(netTotal, paid, hasOverdue),
       recentPayments: s.feePayments.slice(0, 5).map((p) => ({ paidOn: p.paidOn.toISOString(), method: p.method, amount: Number(p.amount) })),
+      discounts: s.feeDiscounts.map((d) => ({ id: d.id, kind: d.kind, valueType: d.valueType, value: Number(d.value), note: d.note })),
+      adjustments: s.feeAdjustments.map((a) => ({ id: a.id, description: a.description, amount: Number(a.amount) })),
     };
   });
 
@@ -52,8 +81,20 @@ export default async function FeesPage() {
 
   return (
     <div style={{ padding: "26px 34px", display: "flex", flexDirection: "column", gap: 16, height: "100dvh", boxSizing: "border-box" }}>
-      <div className="disp" style={{ fontSize: 21 }}>
-        Fees {currentYear && <span style={{ fontSize: 14, fontWeight: 500, color: "var(--faint)" }}>· {currentYear.label}</span>}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div className="disp" style={{ fontSize: 21 }}>
+          Fees {currentYear && <span style={{ fontSize: 14, fontWeight: 500, color: "var(--faint)" }}>· {currentYear.label}</span>}
+        </div>
+        {canEdit && (showDiscounts || showGst) && (
+          <FeeSettingsPanel
+            showLateFine={showDiscounts}
+            showGst={showGst}
+            latePerDay={school?.feeLateFinePerDay ? Number(school.feeLateFinePerDay) : null}
+            lateGraceDays={school?.feeLateFineGraceDays ?? null}
+            gstNumber={school?.gstNumber ?? null}
+            gstRatePercent={school?.gstRatePercent ? Number(school.gstRatePercent) : null}
+          />
+        )}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 13 }}>
@@ -63,7 +104,7 @@ export default async function FeesPage() {
         <Stat label="Overdue accounts" value={overdueCount} color="var(--critical)" />
       </div>
 
-      <FeesView rows={rows} canEdit={canEdit} />
+      <FeesView rows={rows} canEdit={canEdit} showDiscounts={showDiscounts} showGst={showGst} gstNumber={school?.gstNumber ?? null} gstRatePercent={school?.gstRatePercent ? Number(school.gstRatePercent) : null} />
     </div>
   );
 }
@@ -96,6 +137,10 @@ async function ParentFeesView() {
 
   const students = parent?.studentLinks.map((l) => l.student) ?? [];
   const currentYear = await sdb.academicYear.findFirst({ where: { isCurrent: true } });
+  const [showDiscounts, school] = await Promise.all([
+    hasFeature(session!.user.schoolId, "fees.discountsAndFines"),
+    sdb.school.findUnique({ where: { id: session!.user.schoolId! }, select: { feeLateFinePerDay: true, feeLateFineGraceDays: true } }),
+  ]);
 
   const studentFeeData = await Promise.all(
     students.map(async (s) => {
@@ -103,7 +148,20 @@ async function ParentFeesView() {
       const total = structures.reduce((sum, fs) => sum + Number(fs.amount), 0);
       const paid = s.feePayments.reduce((sum, p) => sum + Number(p.amount), 0);
       const paidTerms = new Set(s.feePayments.map((p) => p.feeStructureId));
-      return { student: s, structures, total, paid, paidTerms };
+
+      let discountAmount = 0;
+      let lateFine = 0;
+      if (showDiscounts) {
+        const discounts = await sdb.feeDiscount.findMany({ where: { studentId: s.id } });
+        discountAmount = computeDiscountAmount(total, discounts.map((d) => ({ valueType: d.valueType, value: Number(d.value) })));
+        lateFine = computeLateFine(
+          structures.map((fs) => ({ amount: Number(fs.amount), dueDate: fs.dueDate, paid: s.feePayments.filter((p) => p.feeStructureId === fs.id).reduce((sm, p) => sm + Number(p.amount), 0) })),
+          school?.feeLateFinePerDay ? Number(school.feeLateFinePerDay) : null,
+          school?.feeLateFineGraceDays ?? null
+        );
+      }
+      const netTotal = Math.max(0, total - discountAmount + lateFine);
+      return { student: s, structures, total: netTotal, paid, paidTerms, discountAmount, lateFine };
     })
   );
 
@@ -113,13 +171,22 @@ async function ParentFeesView() {
         Fees
       </div>
       {students.length === 0 && <div style={{ color: "var(--muted)" }}>No students linked to your account.</div>}
-      {studentFeeData.map(({ student: s, structures, total, paid, paidTerms }) => {
+      {studentFeeData.map(({ student: s, structures, total, paid, paidTerms, discountAmount, lateFine }) => {
         return (
           <div key={s.id} className="card" style={{ padding: 20 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14 }}>
-              <div style={{ fontSize: 15.5, fontWeight: 700 }}>{s.name}</div>
-              <div className="mono" style={{ fontSize: 13, color: "var(--muted)" }}>
-                {formatINR(paid)} / {formatINR(total)}
+              <div style={{ fontSize: 15.5, fontWeight: 700 }}>{studentName(s)}</div>
+              <div style={{ textAlign: "right" }}>
+                <div className="mono" style={{ fontSize: 13, color: "var(--muted)" }}>
+                  {formatINR(paid)} / {formatINR(total)}
+                </div>
+                {(discountAmount > 0 || lateFine > 0) && (
+                  <div style={{ fontSize: 10.5, color: "var(--muted)" }}>
+                    {discountAmount > 0 && <span style={{ color: "var(--good)" }}>−{formatINR(discountAmount)} discount</span>}
+                    {discountAmount > 0 && lateFine > 0 && " · "}
+                    {lateFine > 0 && <span style={{ color: "var(--critical)" }}>+{formatINR(lateFine)} late fine</span>}
+                  </div>
+                )}
               </div>
             </div>
             {structures.length === 0 ? (

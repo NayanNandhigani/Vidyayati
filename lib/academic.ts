@@ -13,6 +13,20 @@ export function gradeColor(grade: string): string {
   return "var(--critical)";
 }
 
+export type GradeBand = { label: string; minPercent: number; maxPercent: number };
+
+/**
+ * Maps a percentage to a school's configured GradeScale, if it has one —
+ * pure function, no storage (grade is never denormalized onto Mark). Returns
+ * null when no band's range contains pct, so callers fall back to gradeFor()
+ * for schools that haven't configured a scale, e.g. `gradeForScale(pct,
+ * bands) ?? gradeFor(pct)`.
+ */
+export function gradeForScale(pct: number, bands: GradeBand[]): string | null {
+  const band = bands.find((b) => pct >= b.minPercent && pct <= b.maxPercent);
+  return band?.label ?? null;
+}
+
 export type FeeStatus = "PAID" | "PENDING" | "OVERDUE" | "NONE";
 
 export function feeStatusFor(totalDue: number, totalPaid: number, hasOverdueUnpaid: boolean): FeeStatus {

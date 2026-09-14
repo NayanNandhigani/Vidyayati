@@ -16,7 +16,6 @@ export default async function SubscriptionsPage() {
     invoiceId: inv.id,
     schoolId: inv.schoolId,
     schoolName: inv.school.name,
-    plan: inv.school.plan === "STANDARD" ? "Standard" : "Premium",
     billingPeriod: inv.billingPeriod,
     amount: Number(inv.amount),
     paidAmount: inv.payments.reduce((s, p) => s + Number(p.amount), 0),
@@ -29,17 +28,19 @@ export default async function SubscriptionsPage() {
   const collected = revenueThisFY.reduce((s, p) => s + Number(p.amount), 0);
   const outstanding = rows.filter((r) => r.status !== "PAID").reduce((s, r) => s + Math.max(0, r.amount - r.paidAmount), 0);
   const activeSchools = await db.school.count({ where: { status: "ACTIVE" } });
-  const annualRecurring = await db.school.findMany({ where: { status: { in: ["ACTIVE", "TRIAL"] } }, select: { plan: true } });
 
-  const PLAN_RATE = { STANDARD: 65000, PREMIUM: 150000 }; // illustrative baseline used only to project ARR when no invoice history exists yet
-  const arr = annualRecurring.reduce((s, sc) => s + PLAN_RATE[sc.plan], 0);
+  // ARR projection: each live school's most recent invoice amount, annualized —
+  // real invoice history rather than a flat plan-tier guess.
+  const recurringSchools = await db.school.findMany({ where: { status: { in: ["ACTIVE", "TRIAL"] } }, select: { id: true } });
+  const latestInvoicePerSchool = await db.subscriptionInvoice.findMany({
+    where: { schoolId: { in: recurringSchools.map((s) => s.id) } },
+    orderBy: { createdAt: "desc" },
+    distinct: ["schoolId"],
+    select: { amount: true },
+  });
+  const arr = latestInvoicePerSchool.reduce((s, inv) => s + Number(inv.amount), 0);
 
   const overdueSchools = rows.filter((r) => r.status !== "PAID" && new Date(r.dueDate) < now);
-
-  const standardSchools = annualRecurring.filter((s) => s.plan === "STANDARD").length;
-  const premiumSchools = annualRecurring.filter((s) => s.plan === "PREMIUM").length;
-  const standardRevenue = rows.filter((r) => r.plan === "Standard").reduce((s, r) => s + r.paidAmount, 0);
-  const premiumRevenue = rows.filter((r) => r.plan === "Premium").reduce((s, r) => s + r.paidAmount, 0);
 
   return (
     <div style={{ padding: "28px 36px", display: "flex", flexDirection: "column", gap: 18, height: "100dvh", boxSizing: "border-box" }}>
@@ -78,13 +79,7 @@ export default async function SubscriptionsPage() {
         </div>
       )}
 
-      <SubscriptionsView
-        rows={rows}
-        planBreakdown={[
-          { plan: "Standard", count: standardSchools, total: standardRevenue, color: "var(--marigold)" },
-          { plan: "Premium", count: premiumSchools, total: premiumRevenue, color: "var(--teal)" },
-        ]}
-      />
+      <SubscriptionsView rows={rows} />
     </div>
   );
 }

@@ -2,58 +2,45 @@ import Link from "next/link";
 import { auth } from "@/auth";
 import { getScopedDb } from "@/lib/tenant-db";
 import { requireModuleAccess } from "@/lib/permissions";
-import { initials } from "@/lib/format";
-import { avatarColorFor } from "@/lib/academic";
-import StaffDetailTabs from "./StaffDetailTabs";
+import Avatar from "@/components/Avatar";
+import { SortableHeader, resolveSort } from "@/components/SortableHeader";
+import type { Prisma } from "@prisma/client";
+import StatutoryRatesPanel from "./StatutoryRatesPanel";
+import { hasFeature } from "@/lib/feature-flags";
 
-export default async function EmployeesPage({ searchParams }: { searchParams: Promise<{ staff?: string; q?: string }> }) {
+export default async function EmployeesPage({ searchParams }: { searchParams: Promise<{ q?: string; sortBy?: string; sortDir?: string }> }) {
   await requireModuleAccess("Employees", "VIEW");
   const session = await auth();
   const isAdmin = session!.user.role === "SCHOOL_ADMIN";
   const params = await searchParams;
   const sdb = await getScopedDb();
 
+  const orderBy = resolveSort<Prisma.StaffProfileOrderByWithRelationInput>(
+    params,
+    {
+      name: (dir) => ({ user: { name: dir } }),
+      designation: (dir) => ({ designation: dir }),
+      department: (dir) => ({ department: dir }),
+      contact: (dir) => ({ user: { phone: dir } }),
+      status: (dir) => ({ employmentStatus: dir }),
+    },
+    { user: { name: "asc" } }
+  );
+
   const staffList = await sdb.staffProfile.findMany({
-    where: params.q
-      ? { user: { name: { contains: params.q, mode: "insensitive" } } }
-      : undefined,
+    where: params.q ? { user: { name: { contains: params.q, mode: "insensitive" } } } : undefined,
     include: { user: true },
-    orderBy: { user: { name: "asc" } },
+    orderBy,
   });
 
   const totalStaff = staffList.length;
   const teachingStaff = staffList.filter((s) => (s.designation ?? "").toLowerCase().includes("teacher")).length;
   const onLeaveToday = staffList.filter((s) => s.employmentStatus === "ON_LEAVE").length;
 
-  const selectedId = params.staff ?? staffList[0]?.id;
-  const selected = selectedId ? staffList.find((s) => s.id === selectedId) : undefined;
-
-  let detailData = null;
-  if (selected) {
-    const [attendanceGroups, recentAttendance, payrollRuns, permissions] = await Promise.all([
-      sdb.staffAttendance.groupBy({ by: ["status"], where: { staffId: selected.id }, _count: true }),
-      sdb.staffAttendance.findMany({ where: { staffId: selected.id }, orderBy: { date: "desc" }, take: 10 }),
-      sdb.payrollRun.findMany({ where: { staffId: selected.id }, orderBy: { month: "desc" } }),
-      sdb.staffPermission.findMany({ where: { staffId: selected.id } }),
-    ]);
-    const attendanceTotals = { PRESENT: 0, ABSENT: 0, HALF_DAY: 0 };
-    for (const g of attendanceGroups) attendanceTotals[g.status] = g._count;
-
-    detailData = {
-      staff: {
-        id: selected.id,
-        designation: selected.designation,
-        department: selected.department,
-        dateJoined: selected.dateJoined?.toISOString() ?? null,
-        employmentStatus: selected.employmentStatus,
-        user: { name: selected.user.name, username: selected.user.username, phone: selected.user.phone },
-      },
-      attendanceTotals,
-      recentAttendance: recentAttendance.map((a) => ({ date: a.date.toISOString(), status: a.status })),
-      payrollRuns: payrollRuns.map((p) => ({ month: p.month, amount: Number(p.amount), status: p.status, paidOn: p.paidOn?.toISOString() ?? null })),
-      permissions: Object.fromEntries(permissions.map((p) => [p.moduleName, p.accessLevel])),
-    };
-  }
+  const showStructuredPayroll = await hasFeature(session!.user.schoolId, "payroll.structuredSalary");
+  const school = showStructuredPayroll && isAdmin
+    ? await sdb.school.findUnique({ where: { id: session!.user.schoolId! }, select: { pfPercent: true, esiPercent: true, ptFixedAmount: true, tdsPercent: true } })
+    : null;
 
   return (
     <div style={{ padding: "26px 34px", display: "flex", flexDirection: "column", gap: 16, height: "100dvh", boxSizing: "border-box" }}>
@@ -61,11 +48,15 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
         <div className="disp" style={{ fontSize: 21 }}>
           Employees <span className="mono" style={{ fontSize: 14, fontWeight: 500, color: "var(--faint)" }}>· {totalStaff}</span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <form method="GET">
-            {params.staff && <input type="hidden" name="staff" value={params.staff} />}
-            <input className="in" name="q" defaultValue={params.q} placeholder="Search staff…" style={{ width: 200, background: "var(--card)" }} />
-          </form>
+        <div style={{ display: "flex", gap: 8 }}>
+          {school && (
+            <StatutoryRatesPanel
+              pfPercent={school.pfPercent ? Number(school.pfPercent) : null}
+              esiPercent={school.esiPercent ? Number(school.esiPercent) : null}
+              ptFixedAmount={school.ptFixedAmount ? Number(school.ptFixedAmount) : null}
+              tdsPercent={school.tdsPercent ? Number(school.tdsPercent) : null}
+            />
+          )}
           {isAdmin && (
             <Link href="/app/employees/new" style={{ background: "var(--marigold)", color: "#fff", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>
               + Add Staff
@@ -81,54 +72,57 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
         <Stat label="On leave" value={onLeaveToday} color="var(--warn)" />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 16, flex: 1, minHeight: 0 }}>
-        <div className="card" style={{ padding: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1.9fr 1.6fr 1.1fr 1.3fr 0.9fr", padding: "13px 20px", borderBottom: "1px solid var(--line)", fontSize: 10.5, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-            <div>Staff</div>
-            <div>Designation</div>
-            <div>Department</div>
-            <div>Contact</div>
-            <div>Status</div>
-          </div>
-          <div style={{ overflowY: "auto" }}>
-            {staffList.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>No staff found.</div>}
-            {staffList.map((s) => {
-              const isSelected = s.id === selectedId;
-              return (
-                <Link
-                  key={s.id}
-                  href={`/app/employees?staff=${s.id}${params.q ? `&q=${params.q}` : ""}`}
-                  style={{ display: "grid", gridTemplateColumns: "1.9fr 1.6fr 1.1fr 1.3fr 0.9fr", alignItems: "center", padding: "12px 20px", borderBottom: "1px solid var(--line)", background: isSelected ? "var(--marigold-tint)" : "transparent", textDecoration: "none", color: "inherit" }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ width: 34, height: 34, borderRadius: "50%", background: avatarColorFor(s.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "#fff", flex: "none" }}>
-                      {initials(s.user.name)}
-                    </div>
-                    <div style={{ fontWeight: isSelected ? 700 : 600, fontSize: 13.5 }}>{s.user.name}</div>
-                  </div>
-                  <div style={{ fontSize: 12.5 }}>{s.designation ?? "—"}</div>
-                  <div style={{ fontSize: 12.5, color: "var(--muted)" }}>{s.department ?? "—"}</div>
-                  <div className="mono" style={{ fontSize: 12, color: "var(--muted)" }}>
-                    {s.user.phone ?? "—"}
-                  </div>
-                  <div>
-                    <span className="pill" style={{ background: s.employmentStatus === "ACTIVE" ? "var(--good-tint)" : "var(--warn-tint)", color: s.employmentStatus === "ACTIVE" ? "var(--good)" : "var(--warn)" }}>
-                      {s.employmentStatus === "ACTIVE" ? "Active" : "On Leave"}
-                    </span>
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
+      <div className="card" style={{ padding: 0, display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--line)", background: "var(--paper)" }}>
+          <form method="GET" style={{ display: "flex", gap: 10 }}>
+            <input type="hidden" name="sortBy" value={params.sortBy ?? ""} />
+            <input type="hidden" name="sortDir" value={params.sortDir ?? ""} />
+            <input className="in" name="q" defaultValue={params.q} placeholder="Search staff…" style={{ flex: 1, background: "var(--card)" }} />
+            <button type="submit" style={{ background: "var(--marigold)", color: "#fff", border: "none", borderRadius: 8, padding: "0 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+              Search
+            </button>
+          </form>
         </div>
 
-        {detailData ? (
-          <StaffDetailTabs {...detailData} isAdmin={isAdmin} />
-        ) : (
-          <div className="card" style={{ padding: 32, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)" }}>
-            No staff selected.
-          </div>
-        )}
+        <div style={{ display: "grid", gridTemplateColumns: "1.9fr 1.6fr 1.1fr 1.3fr 0.9fr 0.8fr", padding: "12px 20px", borderBottom: "1px solid var(--line)", fontSize: 11, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          <div><SortableHeader label="Staff" field="name" basePath="/app/employees" currentParams={params} /></div>
+          <div><SortableHeader label="Designation" field="designation" basePath="/app/employees" currentParams={params} /></div>
+          <div><SortableHeader label="Department" field="department" basePath="/app/employees" currentParams={params} /></div>
+          <div><SortableHeader label="Contact" field="contact" basePath="/app/employees" currentParams={params} /></div>
+          <div><SortableHeader label="Status" field="status" basePath="/app/employees" currentParams={params} /></div>
+          <div />
+        </div>
+
+        <div style={{ overflowY: "auto", flex: 1 }}>
+          {staffList.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>No staff found.</div>}
+          {staffList.map((s) => (
+            <div
+              key={s.id}
+              style={{ display: "grid", gridTemplateColumns: "1.9fr 1.6fr 1.1fr 1.3fr 0.9fr 0.8fr", alignItems: "center", padding: "12px 20px", borderBottom: "1px solid var(--line)" }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <Avatar photoPath={s.photoPath} seed={s.id} name={s.user.name} size={34} fontSize={12} />
+                <div style={{ fontWeight: 600, fontSize: 13.5 }}>{s.user.name}</div>
+              </div>
+              <div style={{ fontSize: 12.5 }}>{s.designation ?? "—"}</div>
+              <div style={{ fontSize: 12.5, color: "var(--muted)" }}>{s.department ?? "—"}</div>
+              <div className="mono" style={{ fontSize: 12, color: "var(--muted)" }}>{s.user.phone ?? "—"}</div>
+              <div>
+                <span className="pill" style={{ background: s.employmentStatus === "ACTIVE" ? "var(--good-tint)" : "var(--warn-tint)", color: s.employmentStatus === "ACTIVE" ? "var(--good)" : "var(--warn)" }}>
+                  {s.employmentStatus === "ACTIVE" ? "Active" : "On Leave"}
+                </span>
+              </div>
+              <div>
+                <Link
+                  href={`/app/employees/${s.id}`}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "var(--card)", border: "1px solid var(--line)", borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 700, color: "var(--marigold-deep)", textDecoration: "none" }}
+                >
+                  Open →
+                </Link>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

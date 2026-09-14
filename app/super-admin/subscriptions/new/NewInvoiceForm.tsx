@@ -1,19 +1,28 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import Link from "next/link";
 import { createInvoice, type InvoiceFormState } from "../actions";
 
 const initialState: InvoiceFormState = {};
 
-export default function NewInvoiceForm({ schools }: { schools: { id: string; name: string }[] }) {
+export default function NewInvoiceForm({ schools, plans, defaultSchoolId }: { schools: { id: string; name: string }[]; plans: { id: string; name: string; price: number }[]; defaultSchoolId?: string }) {
   const [state, formAction, pending] = useActionState(createInvoice, initialState);
+  const [planId, setPlanId] = useState("");
+  const [amount, setAmount] = useState("");
+
+  function handlePlanChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const id = e.target.value;
+    setPlanId(id);
+    const plan = plans.find((p) => p.id === id);
+    if (plan) setAmount(String(plan.price));
+  }
 
   return (
     <form action={formAction} style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 440 }}>
       <label className="field">
         School
-        <select className="in" name="schoolId" required defaultValue="">
+        <select className="in" name="schoolId" required defaultValue={defaultSchoolId ?? ""}>
           <option value="" disabled>
             Select school
           </option>
@@ -25,12 +34,23 @@ export default function NewInvoiceForm({ schools }: { schools: { id: string; nam
         </select>
       </label>
       <label className="field">
+        Plan (optional — prefills the amount below)
+        <select className="in" name="planId" value={planId} onChange={handlePlanChange}>
+          <option value="">No plan — custom amount</option>
+          {plans.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name} · ₹{p.price.toLocaleString("en-IN")}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field">
         Billing period
         <input className="in" name="billingPeriod" required placeholder="2026-27" />
       </label>
       <label className="field">
         Amount (₹)
-        <input className="in mono" type="number" name="amount" required min={0} placeholder="185000" />
+        <input className="in mono" type="number" name="amount" required min={0} placeholder="185000" value={amount} onChange={(e) => setAmount(e.target.value)} />
       </label>
       <label className="field">
         Due date

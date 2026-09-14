@@ -12,7 +12,7 @@ export async function setTimetableSlot(
   subjectId: string | null,
   staffId: string | null
 ) {
-  await requireModuleAccess("Timetable", "EDIT");
+  await requireModuleAccess("Timetable", "EDIT", classId);
   const sdb = await getScopedDb();
 
   if (!subjectId || !staffId) {
@@ -20,6 +20,10 @@ export async function setTimetableSlot(
     revalidatePath("/app/timetable");
     return { success: true };
   }
+
+  await sdb.class.findUniqueOrThrow({ where: { id: classId }, select: { id: true } });
+  await sdb.subject.findUniqueOrThrow({ where: { id: subjectId }, select: { id: true } });
+  await sdb.staffProfile.findUniqueOrThrow({ where: { id: staffId }, select: { id: true } });
 
   await sdb.timetableSlot.upsert({
     where: { classId_dayOfWeek_periodNo: { classId, dayOfWeek, periodNo } },

@@ -25,7 +25,7 @@ export default async function EventsPage({ searchParams }: { searchParams: Promi
   }
 
   const accessLevel = await requireModuleAccess("Events", "VIEW");
-  const canEdit = accessLevel === "EDIT" || accessLevel === "FULL";
+  const canEdit = accessLevel === "EDIT";
 
   const events = await sdb.event.findMany({ include: { checklistItems: true }, orderBy: { date: "asc" } });
   const now = new Date();

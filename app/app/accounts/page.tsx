@@ -1,14 +1,36 @@
+import { auth } from "@/auth";
 import { getScopedDb } from "@/lib/tenant-db";
 import { requireModuleAccess } from "@/lib/permissions";
 import { formatINR, formatDate } from "@/lib/format";
+import { hasFeature } from "@/lib/feature-flags";
 import AddTransactionPanel from "./AddTransactionPanel";
+import AccountsDepthPanel from "./AccountsDepthPanel";
+
+const AUTO_SOURCE_LABEL: Record<string, string> = {
+  AUTO_FEES: "Fee payment",
+  AUTO_PAYROLL: "Payroll",
+  AUTO_LIBRARY_FINE: "Library fine",
+  AUTO_INVENTORY_PURCHASE: "Inventory purchase",
+};
 
 export default async function AccountsPage() {
   const accessLevel = await requireModuleAccess("Accounts", "VIEW");
-  const canEdit = accessLevel === "EDIT" || accessLevel === "FULL";
+  const canEdit = accessLevel === "EDIT";
+  const session = await auth();
   const sdb = await getScopedDb();
 
-  const transactions = await sdb.accountsTransaction.findMany({ orderBy: { date: "asc" } });
+  const [showChartOfAccounts, showApprovals] = await Promise.all([
+    hasFeature(session!.user.schoolId, "accounts.chartOfAccounts"),
+    hasFeature(session!.user.schoolId, "accounts.approvals"),
+  ]);
+
+  // Pending-approval rows are held out of every total/balance/report below
+  // — they only count once approved. For schools without the feature this
+  // filters nothing, since approvalStatus never leaves "NONE".
+  const transactions = await sdb.accountsTransaction.findMany({ where: { approvalStatus: { not: "PENDING" } }, orderBy: { date: "asc" } });
+  const pendingTransactions = showApprovals ? await sdb.accountsTransaction.findMany({ where: { approvalStatus: "PENDING" }, orderBy: { date: "desc" } }) : [];
+  const accountHeads = showChartOfAccounts ? await sdb.schoolAccountHead.findMany({ orderBy: { name: "asc" } }) : [];
+  const school = showApprovals ? await sdb.school.findUnique({ where: { id: session!.user.schoolId! }, select: { accountsApprovalThreshold: true } }) : null;
 
   let running = 0;
   const withBalance = transactions.map((t) => {
@@ -115,7 +137,7 @@ export default async function AccountsPage() {
                       <span style={{ color: "var(--faint)", fontWeight: 600, fontSize: 11.5 }}>Manual</span>
                     ) : (
                       <span style={{ fontSize: 10.5, fontWeight: 700, padding: "3px 8px", borderRadius: 100, background: "#EDEFF4", color: "var(--ink2)" }}>
-                        Auto: {t.source === "AUTO_FEES" ? "Fee payment" : "Payroll"}
+                        Auto: {AUTO_SOURCE_LABEL[t.source] ?? "Payroll"}
                       </span>
                     )}
                   </div>
@@ -132,7 +154,18 @@ export default async function AccountsPage() {
           </div>
         </div>
 
-        {canEdit && <AddTransactionPanel />}
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, minHeight: 0, overflowY: "auto" }}>
+          {canEdit && <AddTransactionPanel />}
+          {canEdit && (showChartOfAccounts || showApprovals) && (
+            <AccountsDepthPanel
+              showChartOfAccounts={showChartOfAccounts}
+              showApprovals={showApprovals}
+              accountHeads={accountHeads.map((h) => ({ id: h.id, name: h.name, type: h.type }))}
+              pendingTransactions={pendingTransactions.map((t) => ({ id: t.id, date: t.date.toISOString(), description: t.description, amount: Number(t.amount), type: t.type }))}
+              approvalThreshold={school?.accountsApprovalThreshold ? Number(school.accountsApprovalThreshold) : null}
+            />
+          )}
+        </div>
       </div>
     </div>
   );

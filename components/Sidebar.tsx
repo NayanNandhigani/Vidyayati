@@ -3,21 +3,23 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { NAV_GROUPS } from "./sidebar-config";
-import { IconSchool, IconLogOut } from "./icons";
+import { IconSchool, IconLogOut, IconLock } from "./icons";
 
 type Props = {
   role: "SCHOOL_ADMIN" | "STAFF" | "PARENT";
-  visibleModules: Set<string> | null; // null = no module gating (Admin sees everything)
+  visibleModules: Set<string> | null; // null = no per-staff module gating (Admin sees everything)
+  disabledSchoolModules: Set<string>; // school-wide off switch — hides the item for every role, Admin included
   schoolName: string;
   userName: string;
   onSignOut: () => void;
 };
 
-export default function Sidebar({ role, visibleModules, schoolName, userName, onSignOut }: Props) {
+export default function Sidebar({ role, visibleModules, disabledSchoolModules, schoolName, userName, onSignOut }: Props) {
   const pathname = usePathname();
 
   return (
     <aside
+      className="print-hide"
       style={{
         width: 236,
         flex: "none",
@@ -44,6 +46,7 @@ export default function Sidebar({ role, visibleModules, schoolName, userName, on
         {NAV_GROUPS.map((group) => {
           const items = group.items.filter((item) => {
             if (item.roles && !item.roles.includes(role)) return false;
+            if (item.module && disabledSchoolModules.has(item.module)) return false;
             if (role === "STAFF" && item.module && visibleModules && !visibleModules.has(item.module)) return false;
             return true;
           });
@@ -93,6 +96,9 @@ export default function Sidebar({ role, visibleModules, schoolName, userName, on
           <div style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{userName}</div>
           <div style={{ fontSize: 10.5, color: "#7f8bb0", textTransform: "capitalize" }}>{role.replace("_", " ").toLowerCase()}</div>
         </div>
+        <Link href="/app/change-password" title="Change password" style={{ color: "#aeb8d6", padding: 4, display: "flex" }}>
+          <IconLock style={{ width: 16, height: 16 }} />
+        </Link>
         <button
           onClick={onSignOut}
           title="Sign out"

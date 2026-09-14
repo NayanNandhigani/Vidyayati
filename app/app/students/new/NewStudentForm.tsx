@@ -1,25 +1,50 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useRef, useTransition } from "react";
 import Link from "next/link";
 import { createStudent, type StudentFormState } from "../actions";
+import { suggestAdmissionNo } from "../depth-actions";
 
 const initialState: StudentFormState = {};
 
 export default function NewStudentForm({ classes }: { classes: { id: string; grade: string; section: string }[] }) {
   const [state, formAction, pending] = useActionState(createStudent, initialState);
+  const admissionNoRef = useRef<HTMLInputElement>(null);
+  const [, startTransition] = useTransition();
+
+  function suggest() {
+    startTransition(async () => {
+      const value = await suggestAdmissionNo();
+      if (admissionNoRef.current) admissionNoRef.current.value = value;
+    });
+  }
 
   return (
     <form action={formAction} style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 460 }}>
-      <label className="field">
-        Full name
-        <input className="in" name="name" required placeholder="Aarav Mehta" />
-      </label>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <label className="field">
+          First name
+          <input className="in" name="firstName" required placeholder="Aarav" />
+        </label>
+        <label className="field">
+          Surname
+          <input className="in" name="surname" required placeholder="Mehta" />
+        </label>
+      </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         <label className="field">
           Admission number
-          <input className="in" name="admissionNo" required placeholder="AD-2050" />
+          <div style={{ display: "flex", gap: 6 }}>
+            <input ref={admissionNoRef} className="in" name="admissionNo" required placeholder="AD-2050" style={{ flex: 1 }} />
+            <span
+              onClick={suggest}
+              title="Suggest the next number — feel free to edit it"
+              style={{ fontSize: 11.5, fontWeight: 700, color: "var(--marigold-deep)", cursor: "pointer", whiteSpace: "nowrap", alignSelf: "center" }}
+            >
+              Suggest
+            </span>
+          </div>
         </label>
         <label className="field">
           Class

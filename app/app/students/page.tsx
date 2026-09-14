@@ -1,98 +1,63 @@
 import Link from "next/link";
 import { getScopedDb } from "@/lib/tenant-db";
-import { requireModuleAccess } from "@/lib/permissions";
-import { initials } from "@/lib/format";
-import { avatarColorFor, feeStatusFor, FEE_STATUS_STYLE, gradeFor } from "@/lib/academic";
-import StudentDetailTabs from "./StudentDetailTabs";
-import type { StudentStatus } from "@prisma/client";
+import { requireModuleAccess, getPermittedClassIds } from "@/lib/permissions";
+import { SortableHeader, resolveSort } from "@/components/SortableHeader";
+import { hasFeature } from "@/lib/feature-flags";
+import { auth } from "@/auth";
+import StudentListBody from "./StudentListBody";
+import type { StudentStatus, Prisma } from "@prisma/client";
 
 export default async function StudentsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ student?: string; q?: string; classId?: string; status?: string }>;
+  searchParams: Promise<{ q?: string; classId?: string; status?: string; sortBy?: string; sortDir?: string }>;
 }) {
   await requireModuleAccess("Students", "VIEW");
   const params = await searchParams;
   const sdb = await getScopedDb();
+  const permittedClassIds = await getPermittedClassIds("Students");
 
-  const [classes, currentYear] = await Promise.all([
-    sdb.class.findMany({ orderBy: [{ grade: "asc" }, { section: "asc" }] }),
-    sdb.academicYear.findFirst({ where: { isCurrent: true } }),
-  ]);
+  const classesRaw = await sdb.class.findMany({ orderBy: [{ grade: "asc" }, { section: "asc" }] });
+  // A staff member scoped to specific classes only sees (and can only pick
+  // from) those classes — the module-wide "all classes" case is unaffected.
+  const classes = permittedClassIds === "ALL" ? classesRaw : classesRaw.filter((c) => permittedClassIds.has(c.id));
+
+  // Combine the query-string class filter (if any) with the permission
+  // restriction — an explicit ?classId= outside what's permitted resolves
+  // to "no results" rather than silently falling back to the full list.
+  let classWhere: { classId?: string | { in: string[] } } = {};
+  if (params.classId) {
+    classWhere = permittedClassIds === "ALL" || permittedClassIds.has(params.classId) ? { classId: params.classId } : { classId: "__no_access__" };
+  } else if (permittedClassIds !== "ALL") {
+    classWhere = { classId: { in: [...permittedClassIds] } };
+  }
+
+  const orderBy = resolveSort<Prisma.StudentOrderByWithRelationInput[]>(
+    params,
+    {
+      name: (dir) => [{ firstName: dir }, { surname: dir }],
+      surname: (dir) => [{ surname: dir }, { firstName: dir }],
+      class: (dir) => [{ class: { grade: dir } }, { class: { section: dir } }],
+      section: (dir) => [{ class: { section: dir } }, { class: { grade: dir } }],
+      admissionNo: (dir) => [{ admissionNo: dir }],
+    },
+    [{ firstName: "asc" }, { surname: "asc" }]
+  );
 
   const students = await sdb.student.findMany({
     where: {
       ...(params.q
-        ? { OR: [{ name: { contains: params.q, mode: "insensitive" } }, { admissionNo: { contains: params.q, mode: "insensitive" } }] }
+        ? { OR: [{ firstName: { contains: params.q, mode: "insensitive" } }, { surname: { contains: params.q, mode: "insensitive" } }, { admissionNo: { contains: params.q, mode: "insensitive" } }] }
         : {}),
-      ...(params.classId ? { classId: params.classId } : {}),
       ...(params.status ? { status: params.status as StudentStatus } : {}),
+      ...classWhere,
     },
-    include: {
-      class: true,
-      parentLinks: { include: { parent: true }, take: 1 },
-      feePayments: true,
-    },
-    orderBy: { name: "asc" },
+    include: { class: true },
+    orderBy,
   });
 
-  const feeStructures = currentYear ? await sdb.feeStructure.findMany({ where: { yearId: currentYear.id } }) : [];
-  const feeStructuresByClass = new Map<string, typeof feeStructures>();
-  for (const fs of feeStructures) {
-    feeStructuresByClass.set(fs.classId, [...(feeStructuresByClass.get(fs.classId) ?? []), fs]);
-  }
-
-  function feeStatusForStudent(classId: string, payments: { amount: unknown }[]) {
-    const structures = feeStructuresByClass.get(classId) ?? [];
-    const totalDue = structures.reduce((s, f) => s + Number(f.amount), 0);
-    const totalPaid = payments.reduce((s, p) => s + Number(p.amount), 0);
-    const hasOverdue = structures.some((f) => f.dueDate < new Date()) && totalPaid < totalDue;
-    return feeStatusFor(totalDue, totalPaid, hasOverdue);
-  }
-
-  const selectedId = params.student ?? students[0]?.id;
-  const selected = selectedId
-    ? await sdb.student.findUnique({
-        where: { id: selectedId },
-        include: {
-          class: true,
-          parentLinks: { include: { parent: true } },
-          transportAssignment: { include: { route: true, stop: true } },
-          attendance: { orderBy: { date: "desc" }, take: 15 },
-          feePayments: { include: { feeStructure: true }, orderBy: { paidOn: "desc" } },
-          marks: {
-            include: { examSubject: { include: { exam: true, subject: true } } },
-            orderBy: { examSubject: { exam: { startDate: "desc" } } },
-          },
-        },
-      })
-    : null;
-
-  const selectedFeeStructures = selected ? (feeStructuresByClass.get(selected.classId) ?? []) : [];
-
-  // Attendance stat totals (all recorded days, not just the last 15 shown)
-  const allAttendance = selected
-    ? await sdb.attendance.groupBy({ by: ["status"], where: { studentId: selected.id }, _count: true })
-    : [];
-  const attendanceTotals = { PRESENT: 0, ABSENT: 0, HALF_DAY: 0 };
-  for (const row of allAttendance) attendanceTotals[row.status] = row._count;
-  const attendanceTotal = attendanceTotals.PRESENT + attendanceTotals.ABSENT + attendanceTotals.HALF_DAY;
-  const attendancePct = attendanceTotal ? Math.round((attendanceTotals.PRESENT / attendanceTotal) * 100) : null;
-
-  // Exam marks grouped by exam
-  const examGroups = new Map<string, { examName: string; date: Date; obtained: number; max: number }>();
-  if (selected) {
-    for (const mark of selected.marks) {
-      const exam = mark.examSubject.exam;
-      const key = exam.id;
-      const entry = examGroups.get(key) ?? { examName: exam.name, date: exam.startDate, obtained: 0, max: 0 };
-      entry.obtained += Number(mark.marksObtained);
-      entry.max += mark.examSubject.maxMarks;
-      examGroups.set(key, entry);
-    }
-  }
-  const examResults = [...examGroups.values()].sort((a, b) => b.date.getTime() - a.date.getTime());
-  const latestExamPct = examResults[0] ? Math.round((examResults[0].obtained / examResults[0].max) * 100) : null;
+  const session = await auth();
+  const showReshuffle = await hasFeature(session!.user.schoolId, "classes.coTeacherAndReshuffle");
 
   return (
     <div style={{ padding: "26px 34px", display: "flex", flexDirection: "column", gap: 16, height: "100dvh", boxSizing: "border-box" }}>
@@ -100,15 +65,33 @@ export default async function StudentsPage({
         <div className="disp" style={{ fontSize: 21 }}>
           Students <span className="mono" style={{ fontSize: 14, fontWeight: 500, color: "var(--faint)" }}>· {students.length}</span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Link
+            href="/app/students/bulk-import"
+            style={{ background: "var(--card)", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 600, textDecoration: "none", color: "var(--ink)" }}
+          >
+            Bulk Import ↑
+          </Link>
+          <Link
+            href="/app/students/new"
+            style={{ background: "var(--marigold)", color: "#fff", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}
+          >
+            + Add Student
+          </Link>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 0, display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--line)", background: "var(--paper)" }}>
           <form method="GET" style={{ display: "flex", gap: 10 }}>
-            {params.student && <input type="hidden" name="student" value={params.student} />}
+            <input type="hidden" name="sortBy" value={params.sortBy ?? ""} />
+            <input type="hidden" name="sortDir" value={params.sortDir ?? ""} />
             <input
               className="in"
               name="q"
               defaultValue={params.q}
               placeholder="Search students…"
-              style={{ width: 220, background: "var(--card)" }}
+              style={{ flex: 1, background: "var(--card)" }}
             />
             <select className="in" name="classId" defaultValue={params.classId ?? ""} style={{ width: "auto", background: "var(--card)", fontWeight: 600 }}>
               <option value="">All classes</option>
@@ -123,128 +106,41 @@ export default async function StudentsPage({
               <option value="ACTIVE">Active</option>
               <option value="ALUMNI">Alumni</option>
             </select>
-            <button type="submit" style={{ display: "none" }} />
+            <button
+              type="submit"
+              style={{ background: "var(--marigold)", color: "#fff", border: "none", borderRadius: 8, padding: "0 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+            >
+              Search
+            </button>
           </form>
-          <Link
-            href="/app/students/new"
-            style={{ background: "var(--marigold)", color: "#fff", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}
-          >
-            + Add Student
-          </Link>
-        </div>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1.55fr 1fr", gap: 16, flex: 1, minHeight: 0 }}>
-        <div className="card" style={{ padding: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "2.3fr 1fr 0.9fr 1.3fr 1fr",
-              padding: "14px 20px",
-              borderBottom: "1px solid var(--line)",
-              fontSize: 11,
-              color: "var(--faint)",
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-            }}
-          >
-            <div>Student</div>
-            <div>Adm. No.</div>
-            <div>Class</div>
-            <div>Parent</div>
-            <div>Fee status</div>
-          </div>
-
-          <div style={{ overflowY: "auto", flex: 1 }}>
-            {students.length === 0 && (
-              <div style={{ padding: 32, textAlign: "center", color: "var(--muted)", fontSize: 13.5 }}>
-                No students match these filters.
-              </div>
-            )}
-            {students.map((s) => {
-              const status = feeStatusForStudent(s.classId, s.feePayments);
-              const style = FEE_STATUS_STYLE[status];
-              const isSelected = s.id === selectedId;
-              const search = new URLSearchParams();
-              search.set("student", s.id);
-              if (params.q) search.set("q", params.q);
-              if (params.classId) search.set("classId", params.classId);
-              if (params.status) search.set("status", params.status);
-              const parent = s.parentLinks[0]?.parent;
-
-              return (
-                <Link
-                  key={s.id}
-                  href={`/app/students?${search.toString()}`}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "2.3fr 1fr 0.9fr 1.3fr 1fr",
-                    alignItems: "center",
-                    padding: "13px 20px",
-                    borderBottom: "1px solid var(--line)",
-                    background: isSelected ? "var(--marigold-tint)" : "transparent",
-                    textDecoration: "none",
-                    color: "inherit",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div
-                      style={{
-                        width: 34,
-                        height: 34,
-                        borderRadius: "50%",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 12,
-                        fontWeight: 700,
-                        color: "#fff",
-                        flex: "none",
-                        background: avatarColorFor(s.id),
-                      }}
-                    >
-                      {initials(s.name)}
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: isSelected ? 700 : 600, fontSize: 13.5 }}>{s.name}</div>
-                      <div style={{ fontSize: 11.5, color: "var(--faint)" }}>
-                        {s.class.grade} · {s.class.section}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mono" style={{ fontSize: 12.5, color: "var(--muted)" }}>
-                    {s.admissionNo}
-                  </div>
-                  <div style={{ fontSize: 12.5 }}>
-                    {s.class.grade}-{s.class.section}
-                  </div>
-                  <div style={{ fontSize: 12.5, color: "var(--muted)" }}>{parent?.name ?? "—"}</div>
-                  <div>
-                    <span className="pill" style={{ background: style.bg, color: style.fg }}>
-                      {style.label}
-                    </span>
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
         </div>
 
-        {selected ? (
-          <StudentDetailTabs
-            student={selected}
-            attendancePct={attendancePct}
-            attendanceTotals={attendanceTotals}
-            examResults={examResults}
-            latestExamGrade={latestExamPct !== null ? gradeFor(latestExamPct) : null}
-            latestExamPct={latestExamPct}
-            feeStructures={selectedFeeStructures}
-          />
-        ) : (
-          <div className="card" style={{ padding: 32, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)" }}>
-            No student selected.
-          </div>
-        )}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: showReshuffle ? "auto 1.9fr 1.3fr 0.7fr 0.7fr 1.2fr 0.8fr" : "1.9fr 1.3fr 0.7fr 0.7fr 1.2fr 0.8fr",
+            padding: "12px 20px",
+            borderBottom: "1px solid var(--line)",
+            fontSize: 11,
+            color: "var(--faint)",
+            textTransform: "uppercase",
+            letterSpacing: "0.05em",
+          }}
+        >
+          {showReshuffle && <div />}
+          <div><SortableHeader label="Name" field="name" basePath="/app/students" currentParams={params} /></div>
+          <div><SortableHeader label="Surname" field="surname" basePath="/app/students" currentParams={params} /></div>
+          <div><SortableHeader label="Class" field="class" basePath="/app/students" currentParams={params} /></div>
+          <div><SortableHeader label="Section" field="section" basePath="/app/students" currentParams={params} /></div>
+          <div><SortableHeader label="Admission No." field="admissionNo" basePath="/app/students" currentParams={params} /></div>
+          <div />
+        </div>
+
+        <StudentListBody
+          students={students.map((s) => ({ id: s.id, firstName: s.firstName, surname: s.surname, admissionNo: s.admissionNo, photoPath: s.photoPath, class: { grade: s.class.grade, section: s.class.section } }))}
+          classes={classes.map((c) => ({ id: c.id, grade: c.grade, section: c.section }))}
+          showReshuffle={showReshuffle}
+        />
       </div>
     </div>
   );

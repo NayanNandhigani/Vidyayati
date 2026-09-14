@@ -1,6 +1,9 @@
 import { auth } from "@/auth";
 import { getScopedDb } from "@/lib/tenant-db";
-import { formatINR, formatDate, daysUntil } from "@/lib/format";
+import { getPermittedClassIds } from "@/lib/permissions";
+import { formatINR, formatDate, daysUntil, studentName } from "@/lib/format";
+import { RemindersPanel, StaffAvailabilityTile, PendingApprovalsPanel, NotesPanel } from "./DashboardWidgets";
+import { AttendanceByClassChart, ResultsByClassChart, CashFlowChart } from "./DashboardCharts";
 
 function StatTile({ label, value, color }: { label: string; value: React.ReactNode; color?: string }) {
   return (
@@ -20,13 +23,11 @@ export default async function DashboardPage() {
 
   return (
     <div style={{ padding: "26px 34px", display: "flex", flexDirection: "column", gap: 18 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div>
-          <div className="disp" style={{ fontSize: 21 }}>
-            {greeting()}, {name.split(" ")[0]}
-          </div>
-          <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 2 }}>{formatDate(new Date())}</div>
+      <div>
+        <div className="disp" style={{ fontSize: 21 }}>
+          {greeting()}, {name.split(" ")[0]}
         </div>
+        <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 2 }}>{formatDate(new Date())}</div>
       </div>
 
       {role === "PARENT" ? <ParentDashboard /> : <AdminStaffDashboard />}
@@ -42,74 +43,219 @@ function greeting() {
 }
 
 async function AdminStaffDashboard() {
+  const session = await auth();
+  const isAdmin = session!.user.role === "SCHOOL_ADMIN";
   const sdb = await getScopedDb();
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
   const weekAgo = new Date(today);
   weekAgo.setDate(weekAgo.getDate() - 7);
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const yearStart = new Date(now.getFullYear(), 0, 1);
 
-  const [totalStudents, todaysAttendance, enquiriesThisWeek, upcomingExam, enquiriesThisMonth, currentYear, feePaymentsThisMonth] =
-    await Promise.all([
-      sdb.student.count({ where: { status: "ACTIVE" } }),
-      sdb.attendance.findMany({ where: { date: today } }),
-      sdb.admissionEnquiry.count({ where: { createdAt: { gte: weekAgo } } }),
-      sdb.exam.findFirst({ where: { startDate: { gte: today } }, orderBy: { startDate: "asc" } }),
-      sdb.admissionEnquiry.findMany({ where: { createdAt: { gte: monthStart } }, select: { stage: true } }),
-      sdb.academicYear.findFirst({ where: { isCurrent: true }, include: { feeStructures: true } }),
-      sdb.feePayment.aggregate({ _sum: { amount: true }, where: { paidOn: { gte: monthStart } } }),
+  const [
+    totalStudents,
+    todaysAttendance,
+    upcomingExam,
+    teachingStaff,
+    nonTeachingStaff,
+    staffAttendanceToday,
+    feesTodayAgg,
+    reminderRows,
+    noteRows,
+    classes,
+  ] = await Promise.all([
+    sdb.student.count({ where: { status: "ACTIVE" } }),
+    sdb.attendance.findMany({ where: { date: today } }),
+    sdb.exam.findFirst({ where: { startDate: { gte: today } }, orderBy: { startDate: "asc" } }),
+    sdb.staffProfile.findMany({ where: { staffCategory: "TEACHING" }, include: { user: true }, orderBy: { user: { name: "asc" } } }),
+    sdb.staffProfile.findMany({ where: { staffCategory: "NON_TEACHING" }, include: { user: true }, orderBy: { user: { name: "asc" } } }),
+    sdb.staffAttendance.findMany({ where: { date: today } }),
+    sdb.feePayment.aggregate({ _sum: { amount: true }, where: { paidOn: { gte: today, lt: tomorrow } } }),
+    sdb.dashboardReminder.findMany({ orderBy: [{ remindAt: "asc" }, { createdAt: "desc" }] }),
+    sdb.dashboardNote.findMany({ orderBy: { createdAt: "desc" } }),
+    sdb.class.findMany({ orderBy: [{ grade: "asc" }, { section: "asc" }] }),
+  ]);
+
+  const attendancePresent = todaysAttendance.filter((a) => a.status === "PRESENT").length;
+  const feesToday = Number(feesTodayAgg._sum.amount ?? 0);
+
+  const staffStatusById = new Map(staffAttendanceToday.map((a) => [a.staffId, a.status]));
+  const teachingAvailability = teachingStaff.map((s) => ({ id: s.id, name: s.user.name, status: staffStatusById.get(s.id) ?? null }));
+  const nonTeachingAvailability = nonTeachingStaff.map((s) => ({ id: s.id, name: s.user.name, status: staffStatusById.get(s.id) ?? null }));
+
+  const reminders = reminderRows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    content: r.content,
+    remindAt: r.remindAt ? r.remindAt.toISOString() : null,
+    createdAt: r.createdAt.toISOString(),
+  }));
+  const notes = noteRows.map((n) => ({ id: n.id, content: n.content, createdAt: n.createdAt.toISOString() }));
+
+  // --- Pending approvals — scoped to what THIS viewer can actually act on.
+  // Staff leave, Admissions and Accounts approval are School-Admin-only
+  // workflows with no StaffPermission path at all (see actOnStaffLeave,
+  // approveAdmissionWithFee/rejectAdmission, actOnTransactionApproval) — a
+  // Staff session never sees them. Student leave has a real two-stage
+  // flow: any class-teacher-equivalent Staff (Attendance EDIT, school-wide
+  // or for that specific class) can act on the PENDING stage; only a
+  // School Admin can give the CLASS_TEACHER_APPROVED stage's final
+  // approval. Hostel outings gate on a school-wide Hostel EDIT grant only
+  // (actOnOuting never scopes by class).
+  const approvalItems: { label: string; count: number; href: string }[] = [];
+
+  if (isAdmin) {
+    const [staffLeavePending, studentLeavePending, hostelOutingPending, admissionsPending, accountsPending, announcementsPending] = await Promise.all([
+      sdb.staffLeaveRequest.count({ where: { status: "PENDING" } }),
+      sdb.studentLeaveRequest.count({ where: { stage: { in: ["PENDING", "CLASS_TEACHER_APPROVED"] } } }),
+      sdb.hostelOutingRequest.count({ where: { status: "PENDING" } }),
+      sdb.admissionEnquiry.count({ where: { approvalStatus: "PENDING" } }),
+      sdb.accountsTransaction.count({ where: { approvalStatus: "PENDING" } }),
+      sdb.announcement.count({ where: { approvalStatus: "PENDING" } }),
     ]);
+    approvalItems.push(
+      { label: "Staff leave requests", count: staffLeavePending, href: "/app/employees" },
+      { label: "Student leave requests", count: studentLeavePending, href: "/app/attendance" },
+      { label: "Hostel outing requests", count: hostelOutingPending, href: "/app/hostel" },
+      { label: "Admission approvals", count: admissionsPending, href: "/app/admissions" },
+      { label: "Accounts transactions", count: accountsPending, href: "/app/accounts" },
+      { label: "Announcements awaiting approval", count: announcementsPending, href: "/app/communication" }
+    );
+  } else {
+    const attendanceClassIds = await getPermittedClassIds("Attendance", "EDIT");
+    if (attendanceClassIds === "ALL" || attendanceClassIds.size > 0) {
+      const studentLeavePending = await sdb.studentLeaveRequest.count({
+        where: {
+          stage: "PENDING",
+          ...(attendanceClassIds === "ALL" ? {} : { student: { classId: { in: Array.from(attendanceClassIds) } } }),
+        },
+      });
+      approvalItems.push({ label: "Student leave requests awaiting you", count: studentLeavePending, href: "/app/attendance" });
+    }
 
-  const attendancePct = todaysAttendance.length
-    ? Math.round((todaysAttendance.filter((a) => a.status === "PRESENT").length / todaysAttendance.length) * 100)
-    : null;
+    const hostelClassIds = await getPermittedClassIds("Hostel", "EDIT");
+    if (hostelClassIds === "ALL") {
+      const hostelOutingPending = await sdb.hostelOutingRequest.count({ where: { status: "PENDING" } });
+      approvalItems.push({ label: "Hostel outing requests", count: hostelOutingPending, href: "/app/hostel" });
+    }
+  }
 
-  const billed = (currentYear?.feeStructures ?? []).reduce((sum, fs) => sum + Number(fs.amount), 0);
-  const collected = Number(feePaymentsThisMonth._sum.amount ?? 0);
-  const feePct = billed > 0 ? Math.round((collected / billed) * 100) : 0;
-
-  const enquiryCount = enquiriesThisMonth.length;
-  const applicationCount = enquiriesThisMonth.filter((e) => e.stage === "APPLICATION" || e.stage === "ADMITTED").length;
-  const admittedCount = enquiriesThisMonth.filter((e) => e.stage === "ADMITTED").length;
-
-  const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
-  const transactions = await sdb.accountsTransaction.findMany({ where: { date: { gte: sixMonthsAgo } } });
-  const months = Array.from({ length: 6 }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - 5 + i, 1);
-    return { label: d.toLocaleDateString("en-IN", { month: "short" }), year: d.getFullYear(), month: d.getMonth() };
+  // --- Attendance by class — days present, for day / week / month ---
+  const earliestAttendanceWindow = weekAgo < monthStart ? weekAgo : monthStart;
+  const attendanceRecords = await sdb.attendance.findMany({
+    where: { status: "PRESENT", date: { gte: earliestAttendanceWindow } },
+    select: { date: true, student: { select: { classId: true } } },
   });
-  const monthlyFlow = months.map(({ label, year, month }) => {
-    const inMonth = transactions.filter((t) => t.date.getFullYear() === year && t.date.getMonth() === month);
-    const income = inMonth.filter((t) => t.type === "INCOME").reduce((s, t) => s + Number(t.amount), 0);
-    const expense = inMonth.filter((t) => t.type === "EXPENSE").reduce((s, t) => s + Number(t.amount), 0);
-    return { label, income, expense };
+  function classCounts(from: Date, to: Date) {
+    return classes.map((c) => ({
+      label: `${c.grade}-${c.section}`,
+      count: attendanceRecords.filter((a) => a.student.classId === c.id && a.date >= from && a.date <= to).length,
+    }));
+  }
+  const attendanceByClass = {
+    day: classCounts(today, today),
+    week: classCounts(weekAgo, today),
+    month: classCounts(monthStart, today),
+  };
+
+  // --- Exam results by class, filterable by subject ---
+  const examsThisYear = await sdb.exam.findMany({
+    where: { startDate: { gte: yearStart }, endDate: { lt: now }, approvalStatus: "APPROVED" },
+    include: { class: true, examSubjects: { include: { subject: true, marks: true } } },
   });
-  const maxFlow = Math.max(1, ...monthlyFlow.flatMap((m) => [m.income, m.expense]));
-  const netThisMonth = monthlyFlow[monthlyFlow.length - 1].income - monthlyFlow[monthlyFlow.length - 1].expense;
+  type Agg = { obtained: number; max: number };
+  const perClassAll = new Map<string, Agg>();
+  const perClassSubject = new Map<string, Map<string, Agg>>();
+  const subjectNamesSet = new Set<string>();
+  for (const ex of examsThisYear) {
+    for (const es of ex.examSubjects) {
+      subjectNamesSet.add(es.subject.name);
+      for (const m of es.marks) {
+        const obtained = Number(m.marksObtained);
+        const max = es.maxMarks;
+        const all = perClassAll.get(ex.classId) ?? { obtained: 0, max: 0 };
+        all.obtained += obtained;
+        all.max += max;
+        perClassAll.set(ex.classId, all);
+        let subMap = perClassSubject.get(ex.classId);
+        if (!subMap) {
+          subMap = new Map();
+          perClassSubject.set(ex.classId, subMap);
+        }
+        const sub = subMap.get(es.subject.name) ?? { obtained: 0, max: 0 };
+        sub.obtained += obtained;
+        sub.max += max;
+        subMap.set(es.subject.name, sub);
+      }
+    }
+  }
+  const subjectNames = Array.from(subjectNamesSet).sort();
+  function pctFrom(agg: Agg | undefined): number | null {
+    if (!agg || agg.max === 0) return null;
+    return Math.round((agg.obtained / agg.max) * 100);
+  }
+  const resultsByClassData: Record<string, { label: string; pct: number | null }[]> = {
+    "All subjects": classes.map((c) => ({ label: `${c.grade}-${c.section}`, pct: pctFrom(perClassAll.get(c.id)) })),
+  };
+  for (const subj of subjectNames) {
+    resultsByClassData[subj] = classes.map((c) => ({ label: `${c.grade}-${c.section}`, pct: pctFrom(perClassSubject.get(c.id)?.get(subj)) }));
+  }
+
+  // --- Accounts money flow, bucketed for day / week / month / year ---
+  const fiveYearsAgo = new Date(now.getFullYear() - 4, 0, 1);
+  const allTxns = await sdb.accountsTransaction.findMany({ where: { date: { gte: fiveYearsAgo }, approvalStatus: { not: "PENDING" } } });
+  function sumFlow(txns: typeof allTxns) {
+    return {
+      income: txns.filter((t) => t.type === "INCOME").reduce((s, t) => s + Number(t.amount), 0),
+      expense: txns.filter((t) => t.type === "EXPENSE").reduce((s, t) => s + Number(t.amount), 0),
+    };
+  }
+  const dayBuckets = Array.from({ length: 14 }, (_, i) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() - (13 - i));
+    const next = new Date(d);
+    next.setDate(next.getDate() + 1);
+    return { label: d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }), ...sumFlow(allTxns.filter((t) => t.date >= d && t.date < next)) };
+  });
+  const weekBuckets = Array.from({ length: 8 }, (_, i) => {
+    const weeksAgo = 7 - i;
+    const end = new Date(today);
+    end.setDate(end.getDate() + 1 - weeksAgo * 7);
+    const start = new Date(end);
+    start.setDate(start.getDate() - 7);
+    return { label: `Wk of ${start.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}`, ...sumFlow(allTxns.filter((t) => t.date >= start && t.date < end)) };
+  });
+  const monthBuckets = Array.from({ length: 12 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - 11 + i, 1);
+    const next = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    return { label: d.toLocaleDateString("en-IN", { month: "short" }), ...sumFlow(allTxns.filter((t) => t.date >= d && t.date < next)) };
+  });
+  const yearBuckets = Array.from({ length: 5 }, (_, i) => {
+    const y = now.getFullYear() - 4 + i;
+    const start = new Date(y, 0, 1);
+    const end = new Date(y + 1, 0, 1);
+    return { label: String(y), ...sumFlow(allTxns.filter((t) => t.date >= start && t.date < end)) };
+  });
+  const cashFlow = { day: dayBuckets, week: weekBuckets, month: monthBuckets, year: yearBuckets };
 
   return (
     <>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 13 }}>
-        <StatTile label="Total students" value={totalStudents} />
-        <StatTile label="Attendance today" value={attendancePct === null ? "—" : `${attendancePct}%`} color="var(--teal)" />
+        <StatTile label="Students present today" value={`${attendancePresent} / ${totalStudents}`} color="var(--teal)" />
+        <StaffAvailabilityTile label="Teaching staff today" staff={teachingAvailability} />
+        <StaffAvailabilityTile label="Non-teaching staff today" staff={nonTeachingAvailability} />
+        <StatTile label="Fees collected today" value={formatINR(feesToday)} color="var(--marigold-deep)" />
         <StatTile
-          label="Fees this month"
-          value={
-            <>
-              {formatINR(collected)}
-              {billed > 0 && <span style={{ fontSize: 13, color: "var(--faint)", fontWeight: 500 }}> / {formatINR(billed)}</span>}
-            </>
-          }
-          color="var(--marigold-deep)"
-        />
-        <StatTile label="New enquiries this week" value={enquiriesThisWeek} />
-        <StatTile
-          label="Upcoming exam"
+          label="Next exam"
           value={
             upcomingExam ? (
-              <span style={{ fontSize: 15, fontWeight: 700 }}>
-                {upcomingExam.name} <span style={{ fontWeight: 500, color: "var(--muted)", fontSize: 13 }}>in {daysUntil(upcomingExam.startDate)}d</span>
-              </span>
+              <>
+                {daysUntil(upcomingExam.startDate)}d
+                <div style={{ fontSize: 11, color: "var(--faint)", fontWeight: 500, marginTop: 2 }}>{upcomingExam.name}</div>
+              </>
             ) : (
               <span style={{ fontSize: 14, fontWeight: 600, color: "var(--faint)" }}>None scheduled</span>
             )
@@ -117,89 +263,17 @@ async function AdminStaffDashboard() {
         />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "0.85fr 0.85fr 1.5fr", gap: 16, flex: 1, minHeight: 0 }}>
-        <div className="card" style={{ padding: 20, display: "flex", flexDirection: "column" }}>
-          <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 16 }}>Admissions this month</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 14, flex: 1, justifyContent: "center" }}>
-            <FunnelBar label="Enquiries" value={enquiryCount} pct={100} />
-            <FunnelBar label="Applications" value={applicationCount} pct={enquiryCount ? (applicationCount / enquiryCount) * 100 : 0} opacity={0.7} />
-            <FunnelBar label="Admitted" value={admittedCount} pct={enquiryCount ? (admittedCount / enquiryCount) * 100 : 0} opacity={1} />
-          </div>
-          <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 8 }}>
-            {enquiryCount ? Math.round((admittedCount / enquiryCount) * 100) : 0}% enquiry-to-admission rate
-          </div>
-        </div>
+      <div style={{ display: "grid", gridTemplateColumns: "0.34fr 0.66fr", gridTemplateRows: "repeat(3, minmax(320px, 1fr))", gap: 16 }}>
+        <RemindersPanel reminders={reminders} />
+        <AttendanceByClassChart data={attendanceByClass} />
 
-        <div className="card" style={{ padding: 20, display: "flex", flexDirection: "column" }}>
-          <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 16 }}>Fee collection — current year</div>
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", gap: 14 }}>
-            <div className="mono" style={{ fontSize: 32, fontWeight: 600, color: "var(--marigold-deep)" }}>
-              {feePct}%
-            </div>
-            <div style={{ height: 12, borderRadius: 6, background: "var(--marigold-tint)", overflow: "hidden" }}>
-              <div style={{ height: "100%", width: `${feePct}%`, background: "var(--marigold)", borderRadius: 6 }} />
-            </div>
-            <div style={{ fontSize: 12.5, color: "var(--muted)" }}>
-              {formatINR(collected)} collected of {formatINR(billed)} billed
-            </div>
-          </div>
-        </div>
+        <PendingApprovalsPanel items={approvalItems} />
+        <ResultsByClassChart subjects={subjectNames} data={resultsByClassData} />
 
-        <div className="card" style={{ padding: 20, display: "flex", flexDirection: "column" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 700 }}>Cash flow — Accounts</div>
-            <div style={{ display: "flex", gap: 14, fontSize: 11.5, color: "var(--muted)" }}>
-              <span>
-                <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: "var(--teal)", marginRight: 5 }} />
-                Income
-              </span>
-              <span>
-                <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: "var(--clay)", marginRight: 5 }} />
-                Expense
-              </span>
-            </div>
-          </div>
-          <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 16 }}>
-            Last 6 months · net this month{" "}
-            <span style={{ color: netThisMonth >= 0 ? "var(--good)" : "var(--critical)", fontWeight: 700 }}>
-              {netThisMonth >= 0 ? "+" : ""}
-              {formatINR(netThisMonth)}
-            </span>
-          </div>
-          <div style={{ flex: 1, display: "flex", alignItems: "flex-end", gap: 22, borderBottom: "1px solid var(--line)", paddingBottom: 2 }}>
-            {monthlyFlow.map((m) => (
-              <div key={m.label} style={{ flex: 1, display: "flex", alignItems: "flex-end", gap: 4, height: "100%" }}>
-                <div style={{ flex: 1, height: `${Math.max(2, (m.income / maxFlow) * 100)}%`, background: "var(--teal)", borderRadius: "3px 3px 0 0" }} />
-                <div style={{ flex: 1, height: `${Math.max(2, (m.expense / maxFlow) * 100)}%`, background: "var(--clay)", borderRadius: "3px 3px 0 0" }} />
-              </div>
-            ))}
-          </div>
-          <div style={{ display: "flex", marginTop: 8, fontSize: 10.5, color: "var(--faint)" }}>
-            {monthlyFlow.map((m) => (
-              <span key={m.label} style={{ flex: 1, textAlign: "center" }}>
-                {m.label}
-              </span>
-            ))}
-          </div>
-        </div>
+        <NotesPanel notes={notes} />
+        <CashFlowChart data={cashFlow} />
       </div>
     </>
-  );
-}
-
-function FunnelBar({ label, value, pct, opacity = 0.45 }: { label: string; value: number; pct: number; opacity?: number }) {
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 5 }}>
-        <span style={{ color: "var(--muted)" }}>{label}</span>
-        <span className="mono" style={{ fontWeight: 700 }}>
-          {value}
-        </span>
-      </div>
-      <div style={{ height: 9, borderRadius: 5, background: "var(--marigold-tint)" }}>
-        <div style={{ height: "100%", width: `${Math.min(100, pct)}%`, borderRadius: 5, background: "var(--marigold)", opacity }} />
-      </div>
-    </div>
   );
 }
 
@@ -241,7 +315,7 @@ async function ParentDashboard() {
       {students.map((student) => (
         <div key={student.id} className="card" style={{ padding: 20 }}>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 14 }}>
-            <div style={{ fontSize: 15.5, fontWeight: 700 }}>{student.name}</div>
+            <div style={{ fontSize: 15.5, fontWeight: 700 }}>{studentName(student)}</div>
             <div style={{ fontSize: 12.5, color: "var(--muted)" }}>
               Grade {student.class.grade}
               {student.class.section} · {student.admissionNo}

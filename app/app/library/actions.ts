@@ -17,6 +17,7 @@ export async function createBook(_prevState: FormState, formData: FormData): Pro
   const accessionNo = formData.get("accessionNo");
   const category = formData.get("category");
   const copies = formData.get("copies");
+  const isbn = formData.get("isbn");
 
   if (typeof title !== "string" || !title.trim() || typeof accessionNo !== "string" || !accessionNo.trim() || typeof copies !== "string" || !copies) {
     return { error: "Title, accession number, and copy count are required." };
@@ -30,6 +31,7 @@ export async function createBook(_prevState: FormState, formData: FormData): Pro
       category: typeof category === "string" && category ? category : null,
       copiesTotal: Number(copies),
       copiesAvailable: Number(copies),
+      isbn: typeof isbn === "string" && isbn.trim() ? isbn.trim() : null,
     }),
   });
 
@@ -37,11 +39,52 @@ export async function createBook(_prevState: FormState, formData: FormData): Pro
   redirect("/app/library");
 }
 
+export type UpdateBookFields = { title: string; author: string | null; accessionNo: string; category: string | null; copiesTotal: number; isbn: string | null };
+
+export async function updateBook(bookId: string, fields: UpdateBookFields) {
+  await requireModuleAccess("Library", "EDIT");
+  if (!fields.title.trim() || !fields.accessionNo.trim() || !(fields.copiesTotal >= 0)) {
+    throw new Error("Title, accession number, and a valid copy count are required.");
+  }
+  const sdb = await getScopedDb();
+  const book = await sdb.libraryBook.findUniqueOrThrow({ where: { id: bookId } });
+
+  // Copies currently checked out never change on an edit — only the total
+  // (and therefore how many of the new total remain available) does.
+  const issuedCount = book.copiesTotal - book.copiesAvailable;
+  const newAvailable = Math.max(0, fields.copiesTotal - issuedCount);
+
+  await sdb.libraryBook.update({
+    where: { id: bookId },
+    data: {
+      title: fields.title.trim(),
+      author: fields.author?.trim() || null,
+      accessionNo: fields.accessionNo.trim(),
+      category: fields.category?.trim() || null,
+      copiesTotal: fields.copiesTotal,
+      copiesAvailable: newAvailable,
+      isbn: fields.isbn?.trim() || null,
+    },
+  });
+
+  revalidatePath("/app/library");
+}
+
+export async function deleteBook(bookId: string) {
+  await requireModuleAccess("Library", "EDIT");
+  const sdb = await getScopedDb();
+  const activeLoans = await sdb.libraryCirculation.count({ where: { bookId, status: "ISSUED" } });
+  if (activeLoans > 0) throw new Error("This title has copies currently on loan — return them before deleting it.");
+  await sdb.libraryBook.delete({ where: { id: bookId } });
+  revalidatePath("/app/library");
+}
+
 export async function issueBook(studentId: string, bookId: string) {
   await requireModuleAccess("Library", "EDIT");
   const sdb = await getScopedDb();
 
   const book = await sdb.libraryBook.findUniqueOrThrow({ where: { id: bookId } });
+  await sdb.student.findUniqueOrThrow({ where: { id: studentId }, select: { id: true } });
   if (book.copiesAvailable <= 0) throw new Error("No copies available.");
 
   const issueDate = new Date();

@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
+import { studentName } from "@/lib/format";
 import { publishAnnouncement, type AnnouncementFormState } from "./actions";
 
 const AUDIENCES = [
@@ -12,7 +13,7 @@ const AUDIENCES = [
 
 const initialState: AnnouncementFormState = {};
 
-export default function ComposeForm({ classes, students }: { classes: { id: string; grade: string; section: string }[]; students: { id: string; name: string }[] }) {
+export default function ComposeForm({ classes, students }: { classes: { id: string; grade: string; section: string }[]; students: { id: string; firstName: string; surname: string }[] }) {
   const [audience, setAudience] = useState<(typeof AUDIENCES)[number]["key"]>("ALL_PARENTS");
   const [scheduled, setScheduled] = useState(false);
   const [state, formAction, pending] = useActionState(publishAnnouncement, initialState);
@@ -72,7 +73,7 @@ export default function ComposeForm({ classes, students }: { classes: { id: stri
           <select className="in" name="audienceTarget" required style={{ marginTop: 9 }}>
             {students.map((s) => (
               <option key={s.id} value={s.id}>
-                {s.name}
+                {studentName(s)}
               </option>
             ))}
           </select>
@@ -108,7 +109,7 @@ export default function ComposeForm({ classes, students }: { classes: { id: stri
         disabled={pending}
         style={{ background: "var(--marigold)", color: "#fff", border: "none", borderRadius: 8, padding: 10, fontSize: 13, fontWeight: 700, cursor: pending ? "default" : "pointer", opacity: pending ? 0.7 : 1 }}
       >
-        {pending ? "Publishing…" : scheduled ? "Schedule announcement" : "Publish announcement"}
+        {pending ? "Submitting…" : "Submit for approval"}
       </button>
     </form>
   );

@@ -1,10 +1,13 @@
 import { auth } from "@/auth";
 import { getScopedDb } from "@/lib/tenant-db";
-import { requireModuleAccess } from "@/lib/permissions";
-import { formatDate } from "@/lib/format";
+import { requireModuleAccess, getPermittedClassIds } from "@/lib/permissions";
+import { formatDate, studentName } from "@/lib/format";
 import { subjectStyleFor } from "@/lib/academic";
+import { hasFeature } from "@/lib/feature-flags";
+import { getTeacherWorkload } from "./depth-actions";
 import TimetableFilter from "./TimetableFilter";
 import TimetableGrid from "./TimetableGrid";
+import RoomsPanel from "./RoomsPanel";
 import type { DayOfWeek } from "@prisma/client";
 
 function todayColumn() {
@@ -13,8 +16,8 @@ function todayColumn() {
 }
 
 async function buildGrid(sdb: Awaited<ReturnType<typeof getScopedDb>>, classId: string) {
-  const slots = await sdb.timetableSlot.findMany({ where: { classId }, include: { subject: true, staff: { include: { user: true } } } });
-  const grid: Record<number, Partial<Record<DayOfWeek, { subjectId: string; subjectName: string; staffId: string; staffName: string }>>> = {};
+  const slots = await sdb.timetableSlot.findMany({ where: { classId }, include: { subject: true, staff: { include: { user: true } }, room: true } });
+  const grid: Record<number, Partial<Record<DayOfWeek, { subjectId: string; subjectName: string; staffId: string; staffName: string; roomId: string | null; roomName: string | null }>>> = {};
   for (const slot of slots) {
     grid[slot.periodNo] = grid[slot.periodNo] ?? {};
     grid[slot.periodNo]![slot.dayOfWeek] = {
@@ -22,6 +25,8 @@ async function buildGrid(sdb: Awaited<ReturnType<typeof getScopedDb>>, classId: 
       subjectName: slot.subject.name,
       staffId: slot.staffId,
       staffName: slot.staff.user.name,
+      roomId: slot.roomId,
+      roomName: slot.room?.name ?? null,
     };
   }
   return grid;
@@ -36,18 +41,29 @@ export default async function TimetablePage({ searchParams }: { searchParams: Pr
     return <ParentTimetableView />;
   }
 
-  const accessLevel = await requireModuleAccess("Timetable", "VIEW");
-  const canEdit = accessLevel === "EDIT" || accessLevel === "FULL";
+  const permittedClassIds = await getPermittedClassIds("Timetable", "VIEW");
+  if (permittedClassIds !== "ALL" && permittedClassIds.size === 0) {
+    await requireModuleAccess("Timetable", "VIEW");
+  }
 
-  const [classes, subjects, staff] = await Promise.all([
+  const [classesRaw, subjects, staff, showRooms, rooms, workload] = await Promise.all([
     sdb.class.findMany({ orderBy: [{ grade: "asc" }, { section: "asc" }], include: { classTeacher: { include: { user: true } } } }),
     sdb.subject.findMany({ orderBy: { name: "asc" } }),
     sdb.staffProfile.findMany({ include: { user: true }, orderBy: { user: { name: "asc" } } }),
+    hasFeature(session!.user.schoolId, "timetable.roomsAndConflicts"),
+    sdb.room.findMany({ orderBy: { name: "asc" } }),
+    getTeacherWorkload(),
   ]);
+  const classes = permittedClassIds === "ALL" ? classesRaw : classesRaw.filter((c) => permittedClassIds.has(c.id));
 
   const classId = params.classId ?? classes[0]?.id ?? "";
   const selectedClass = classes.find((c) => c.id === classId);
   const grid = classId ? await buildGrid(sdb, classId) : {};
+
+  // Per-class access — a staffer can have EDIT on one class's timetable and
+  // only VIEW (or none) on another.
+  const accessLevel = classId ? await requireModuleAccess("Timetable", "VIEW", classId) : "NONE";
+  const canEdit = accessLevel === "EDIT";
 
   return (
     <div style={{ padding: "22px 30px", display: "flex", flexDirection: "column", gap: 13, height: "100dvh", boxSizing: "border-box" }}>
@@ -69,6 +85,26 @@ export default async function TimetablePage({ searchParams }: { searchParams: Pr
           </span>
         ))}
       </div>
+
+      {showRooms && (
+        <div className="card" style={{ padding: "12px 18px", display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
+          <RoomsPanel rooms={rooms.map((r) => ({ id: r.id, name: r.name, capacity: r.capacity, equipmentNote: r.equipmentNote }))} />
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <div className="mono" style={{ fontSize: 10, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--faint)", marginBottom: 6 }}>
+              Teacher workload (periods/week)
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 100, overflowY: "auto" }}>
+              {workload.slice(0, 6).map((w) => (
+                <div key={w.name} style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5 }}>
+                  <span>{w.name}</span>
+                  <span className="mono" style={{ fontWeight: 700, color: w.count > 30 ? "var(--critical)" : "var(--muted)" }}>{w.count}</span>
+                </div>
+              ))}
+              {workload.length === 0 && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>No slots scheduled yet.</div>}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="card" style={{ padding: 0, flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <div style={{ display: "grid", gridTemplateColumns: "84px repeat(6,1fr)", borderBottom: "1px solid var(--line)", flex: "none" }}>
@@ -97,6 +133,8 @@ export default async function TimetablePage({ searchParams }: { searchParams: Pr
             staff={staff.map((s) => ({ id: s.id, name: s.user.name }))}
             todayCol={todayColumn()}
             canEdit={canEdit}
+            rooms={rooms.map((r) => ({ id: r.id, name: r.name }))}
+            showRooms={showRooms}
           />
         ) : (
           <div style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>No classes set up yet.</div>
@@ -132,7 +170,7 @@ async function ParentTimetableView() {
   return (
     <div style={{ padding: "22px 30px", display: "flex", flexDirection: "column", gap: 13, height: "100dvh", boxSizing: "border-box" }}>
       <div className="disp" style={{ fontSize: 21 }}>
-        Timetable · {student.name} · Class {student.class.grade}-{student.class.section}
+        Timetable · {studentName(student)} · Class {student.class.grade}-{student.class.section}
       </div>
       <div className="card" style={{ padding: 0, flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <div style={{ display: "grid", gridTemplateColumns: "84px repeat(6,1fr)", borderBottom: "1px solid var(--line)", flex: "none" }}>
@@ -143,7 +181,7 @@ async function ParentTimetableView() {
             </div>
           ))}
         </div>
-        <TimetableGrid classId={student.classId} grid={grid} subjects={subjects} staff={[]} todayCol={todayColumn()} canEdit={false} />
+        <TimetableGrid classId={student.classId} grid={grid} subjects={subjects} staff={[]} todayCol={todayColumn()} canEdit={false} rooms={[]} showRooms={false} />
       </div>
     </div>
   );

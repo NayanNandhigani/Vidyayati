@@ -36,7 +36,7 @@ export default function AccountHealthPanel({ schools }: { schools: SchoolHealth[
                 <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink)" }}>{s.schoolName}</span>
                 <span style={{ fontSize: 12, color: "var(--muted)" }}>— {s.reason}</span>
               </div>
-              <Link href={`/super-admin/schools?school=${s.schoolId}`} style={{ fontSize: 11.5, fontWeight: 700, color: "var(--marigold-deep)", textDecoration: "none", flex: "none" }}>
+              <Link href={`/super-admin/schools/${s.schoolId}`} style={{ fontSize: 11.5, fontWeight: 700, color: "var(--marigold-deep)", textDecoration: "none", flex: "none" }}>
                 View →
               </Link>
             </div>

@@ -16,8 +16,16 @@ export default function NewEnquiryForm() {
         <input className="in" name="applicantName" required placeholder="Priya Nair" />
       </label>
       <label className="field">
-        Parent contact
+        Parent name
+        <input className="in" name="parentName" placeholder="Ravi Nair" />
+      </label>
+      <label className="field">
+        Contact number
         <input className="in mono" name="parentContact" required placeholder="+91 98XXX XXXXX" />
+      </label>
+      <label className="field">
+        Address
+        <textarea className="in" name="address" rows={2} />
       </label>
       <label className="field">
         Class applying for

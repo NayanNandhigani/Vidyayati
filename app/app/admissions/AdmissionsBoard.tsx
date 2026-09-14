@@ -1,19 +1,38 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { avatarColorFor } from "@/lib/academic";
 import { initials } from "@/lib/format";
 import { advanceToApplication, admitEnquiry } from "./actions";
 
-type Enquiry = { id: string; applicantName: string; parentContact: string; classApplied: string; stage: "ENQUIRY" | "APPLICATION" | "ADMITTED" };
+type Enquiry = {
+  id: string;
+  applicantName: string;
+  parentContact: string;
+  classApplied: string;
+  stage: "ENQUIRY" | "APPLICATION" | "ADMITTED";
+  approvalStatus: "NONE" | "PENDING" | "APPROVED" | "REJECTED";
+};
 
+const APPROVAL_STYLE: Record<string, { bg: string; fg: string }> = {
+  NONE: { bg: "var(--line)", fg: "var(--muted)" },
+  PENDING: { bg: "var(--warn-tint)", fg: "var(--warn)" },
+  APPROVED: { bg: "var(--good-tint)", fg: "var(--good)" },
+  REJECTED: { bg: "var(--critical-tint)", fg: "var(--critical)" },
+};
+
+// Once an enquiry is admitted it becomes a real Student record (see Students)
+// — there's nothing further to do with it on this board, so it isn't given
+// its own column here. The enquiry row itself is kept (stage: "ADMITTED")
+// for the pipeline's own history/conversion-rate stats above, it just isn't
+// rendered as a card once it reaches that stage.
 const COLS = [
   { stage: "ENQUIRY" as const, label: "Enquiries", bg: "var(--marigold-tint)", fg: "var(--marigold-deep)" },
   { stage: "APPLICATION" as const, label: "Applications", bg: "var(--teal-tint)", fg: "var(--teal)" },
-  { stage: "ADMITTED" as const, label: "Admitted", bg: "var(--good-tint)", fg: "var(--good)" },
 ];
 
-export default function AdmissionsBoard({ enquiries, classes, canEdit }: { enquiries: Enquiry[]; classes: { id: string; grade: string; section: string }[]; canEdit: boolean }) {
+export default function AdmissionsBoard({ enquiries, classes, canEdit, showDetailedForm }: { enquiries: Enquiry[]; classes: { id: string; grade: string; section: string }[]; canEdit: boolean; showDetailedForm: boolean }) {
   const [admitting, setAdmitting] = useState<string | null>(null);
   const [classId, setClassId] = useState(classes[0]?.id ?? "");
   const [pending, startTransition] = useTransition();
@@ -82,19 +101,34 @@ export default function AdmissionsBoard({ enquiries, classes, canEdit }: { enqui
                     </div>
                   </div>
 
+                  {showDetailedForm && (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      {e.approvalStatus !== "NONE" && (
+                        <span className="pill" style={{ background: APPROVAL_STYLE[e.approvalStatus].bg, color: APPROVAL_STYLE[e.approvalStatus].fg, fontSize: 10 }}>
+                          {e.approvalStatus}
+                        </span>
+                      )}
+                      {col.stage !== "ENQUIRY" && (
+                        <Link href={`/app/admissions/${e.id}`} style={{ fontSize: 11, fontWeight: 700, color: "var(--marigold-deep)", textDecoration: "none", marginLeft: "auto" }}>
+                          View application →
+                        </Link>
+                      )}
+                    </div>
+                  )}
+
                   {canEdit && col.stage === "ENQUIRY" && (
                     <button onClick={() => move(e.id)} disabled={pending} style={moveBtnStyle}>
                       Move →
                     </button>
                   )}
 
-                  {canEdit && col.stage === "APPLICATION" && admitting !== e.id && (
+                  {canEdit && !showDetailedForm && col.stage === "APPLICATION" && admitting !== e.id && (
                     <button onClick={() => setAdmitting(e.id)} disabled={pending} style={moveBtnStyle}>
                       Move →
                     </button>
                   )}
 
-                  {canEdit && col.stage === "APPLICATION" && admitting === e.id && (
+                  {canEdit && !showDetailedForm && col.stage === "APPLICATION" && admitting === e.id && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
                       <select value={classId} onChange={(ev) => setClassId(ev.target.value)} style={{ fontSize: 11.5, padding: 4 }}>
                         {classes.map((c) => (

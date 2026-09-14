@@ -1,11 +1,11 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { initials } from "@/lib/format";
-import { avatarColorFor, gradeFor, gradeColor } from "@/lib/academic";
+import { initials, studentName } from "@/lib/format";
+import { avatarColorFor, gradeFor, gradeForScale, gradeColor, type GradeBand } from "@/lib/academic";
 import { saveMarks } from "./actions";
 
-type Student = { id: string; name: string };
+type Student = { id: string; firstName: string; surname: string };
 type ExamSubject = { id: string; maxMarks: number; subject: { id: string; name: string } };
 
 const PASS_MARK = 33;
@@ -18,6 +18,7 @@ export default function ExamMarksGrid({
   examSubjects,
   initialMarks,
   canEdit,
+  gradeBands,
 }: {
   examId: string;
   examName: string;
@@ -26,11 +27,15 @@ export default function ExamMarksGrid({
   examSubjects: ExamSubject[];
   initialMarks: Record<string, Record<string, number>>;
   canEdit: boolean;
+  gradeBands: GradeBand[];
 }) {
+  const gradeForPct = (pct: number) => gradeForScale(pct, gradeBands) ?? gradeFor(pct);
   const [marks, setMarks] = useState(initialMarks);
   const [previewId, setPreviewId] = useState(students[0]?.id ?? null);
   const [pending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
+  const [sortField, setSortField] = useState<"name" | "total">("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const maxTotal = examSubjects.reduce((s, es) => s + es.maxMarks, 0);
 
@@ -43,6 +48,23 @@ export default function ExamMarksGrid({
     const row = marks[studentId] ?? {};
     return examSubjects.reduce((s, es) => s + (row[es.id] ?? 0), 0);
   }
+
+  function toggleSort(field: "name" | "total") {
+    if (sortField === field) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortField(field);
+      setSortDir(field === "total" ? "desc" : "asc");
+    }
+  }
+
+  // Sorted client-side — this grid already holds every student+mark for
+  // one exam/class in memory, no server round-trip needed to reorder it.
+  const sortedStudents = useMemo(() => {
+    const sorted = [...students].sort((a, b) =>
+      sortField === "name" ? studentName(a).localeCompare(studentName(b)) : rowTotal(a.id) - rowTotal(b.id)
+    );
+    return sortDir === "asc" ? sorted : sorted.reverse();
+  }, [students, sortField, sortDir, marks]);
 
   function save() {
     startTransition(async () => {
@@ -98,19 +120,23 @@ export default function ExamMarksGrid({
             letterSpacing: "0.05em",
           }}
         >
-          <div>Student</div>
+          <div onClick={() => toggleSort("name")} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: sortField === "name" ? "var(--marigold-deep)" : undefined }}>
+            Student <span style={{ fontSize: 9, opacity: sortField === "name" ? 1 : 0.35 }}>{sortField === "name" && sortDir === "desc" ? "▼" : "▲"}</span>
+          </div>
           {examSubjects.map((es) => (
             <div key={es.id} style={{ textAlign: "center" }}>
               {es.subject.name}
             </div>
           ))}
-          <div style={{ textAlign: "center" }}>Total</div>
+          <div onClick={() => toggleSort("total")} style={{ textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center", gap: 4, cursor: "pointer", color: sortField === "total" ? "var(--marigold-deep)" : undefined }}>
+            Total <span style={{ fontSize: 9, opacity: sortField === "total" ? 1 : 0.35 }}>{sortField === "total" && sortDir === "asc" ? "▲" : "▼"}</span>
+          </div>
           <div style={{ textAlign: "center" }}>%</div>
         </div>
 
         <div style={{ overflowY: "auto", flex: 1 }}>
           {students.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>No students in this class.</div>}
-          {students.map((s) => {
+          {sortedStudents.map((s) => {
             const total = rowTotal(s.id);
             const pct = maxTotal > 0 ? (total / maxTotal) * 100 : 0;
             const selected = s.id === previewId;
@@ -130,9 +156,9 @@ export default function ExamMarksGrid({
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
                   <div style={{ width: 26, height: 26, borderRadius: "50%", background: avatarColorFor(s.id), fontSize: 10.5, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, flex: "none" }}>
-                    {initials(s.name)}
+                    {initials(studentName(s))}
                   </div>
-                  <div style={{ fontWeight: selected ? 700 : 600, fontSize: 13 }}>{s.name}</div>
+                  <div style={{ fontWeight: selected ? 700 : 600, fontSize: 13 }}>{studentName(s)}</div>
                 </div>
                 {examSubjects.map((es) => {
                   const v = marks[s.id]?.[es.id];
@@ -151,13 +177,14 @@ export default function ExamMarksGrid({
                       style={{
                         width: "100%",
                         textAlign: "center",
-                        border: "none",
-                        background: failing ? "var(--critical-tint)" : "transparent",
+                        border: canEdit ? `1px solid ${failing ? "var(--critical-border)" : "var(--marigold-tint)"}` : "none",
+                        background: failing ? "var(--critical-tint)" : canEdit ? "var(--marigold-tint)" : "transparent",
                         color: failing ? "var(--critical)" : "var(--ink)",
                         fontWeight: 700,
                         fontSize: 13,
-                        borderRadius: 4,
-                        padding: "4px 0",
+                        borderRadius: 5,
+                        padding: "5px 0",
+                        margin: "1px 0",
                       }}
                     />
                   );
@@ -180,10 +207,10 @@ export default function ExamMarksGrid({
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
               <div style={{ width: 44, height: 44, borderRadius: "50%", background: avatarColorFor(preview.student.id), fontSize: 14.5, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, flex: "none" }}>
-                {initials(preview.student.name)}
+                {initials(studentName(preview.student))}
               </div>
               <div>
-                <div style={{ fontWeight: 700, fontSize: 15 }}>{preview.student.name}</div>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>{studentName(preview.student)}</div>
                 <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
                   {className} · {examName}
                 </div>
@@ -225,8 +252,8 @@ export default function ExamMarksGrid({
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13 }}>
                 <span style={{ color: "var(--muted)" }}>Grade</span>
-                <span className="pill" style={{ background: "var(--paper)", color: gradeColor(gradeFor(preview.pct)), border: "1px solid var(--line)", fontSize: 13, padding: "4px 12px" }}>
-                  {gradeFor(preview.pct)}
+                <span className="pill" style={{ background: "var(--paper)", color: gradeColor(gradeForPct(preview.pct)), border: "1px solid var(--line)", fontSize: 13, padding: "4px 12px" }}>
+                  {gradeForPct(preview.pct)}
                 </span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>

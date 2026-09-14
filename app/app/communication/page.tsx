@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { getScopedDb } from "@/lib/tenant-db";
 import { requireModuleAccess } from "@/lib/permissions";
 import ComposeForm from "./ComposeForm";
+import { PendingAnnouncementsPanel } from "./PendingAnnouncementsPanel";
 
 const AUDIENCE_STYLE: Record<string, { bg: string; fg: string; label: string }> = {
   ALL_PARENTS: { bg: "var(--marigold-tint)", fg: "var(--marigold-deep)", label: "All Parents" },
@@ -19,16 +20,19 @@ export default async function CommunicationPage() {
   }
 
   const accessLevel = await requireModuleAccess("Communication", "VIEW");
-  const canEdit = accessLevel === "EDIT" || accessLevel === "FULL";
+  const canEdit = accessLevel === "EDIT";
 
   if (!canEdit) {
     return <RecipientView />;
   }
 
-  const [announcements, classes, students, totalParents, totalStaff] = await Promise.all([
-    sdb.announcement.findMany({ where: { publishedOn: { not: null } }, include: { reads: true }, orderBy: { publishedOn: "desc" }, take: 30 }),
+  const isAdmin = session!.user.role === "SCHOOL_ADMIN";
+
+  const [announcements, pending, classes, students, totalParents, totalStaff] = await Promise.all([
+    sdb.announcement.findMany({ where: { approvalStatus: "APPROVED" }, include: { reads: true }, orderBy: { publishedOn: "desc" }, take: 30 }),
+    sdb.announcement.findMany({ where: { approvalStatus: "PENDING" }, orderBy: { createdAt: "desc" } }),
     sdb.class.findMany({ orderBy: [{ grade: "asc" }, { section: "asc" }] }),
-    sdb.student.findMany({ where: { status: "ACTIVE" }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    sdb.student.findMany({ where: { status: "ACTIVE" }, orderBy: [{ firstName: "asc" }, { surname: "asc" }], select: { id: true, firstName: true, surname: true } }),
     sdb.parent.count(),
     sdb.staffProfile.count(),
   ]);
@@ -64,6 +68,11 @@ export default async function CommunicationPage() {
         </div>
         <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 2 }}>In-app announcements &amp; circulars</div>
       </div>
+
+      <PendingAnnouncementsPanel
+        items={pending.map((a) => ({ id: a.id, title: a.title, body: a.body, audienceType: a.audienceType, createdAt: a.createdAt.toISOString() }))}
+        isAdmin={isAdmin}
+      />
 
       <div style={{ display: "grid", gridTemplateColumns: "1.28fr 1fr", gap: 16, flex: 1, minHeight: 0 }}>
         <div className="card" style={{ padding: "20px 22px", display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -136,7 +145,7 @@ async function RecipientView() {
   }
 
   const announcements = await sdb.announcement.findMany({
-    where: { publishedOn: { not: null }, ...audienceFilter },
+    where: { approvalStatus: "APPROVED", ...audienceFilter },
     orderBy: { publishedOn: "desc" },
     take: 30,
   });

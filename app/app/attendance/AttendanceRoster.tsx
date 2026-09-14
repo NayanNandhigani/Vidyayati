@@ -1,12 +1,12 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { initials } from "@/lib/format";
+import { initials, studentName } from "@/lib/format";
 import { avatarColorFor } from "@/lib/academic";
 import type { AttendanceStatus } from "@prisma/client";
 import { saveAttendance } from "./actions";
 
-type Student = { id: string; name: string; admissionNo: string };
+type Student = { id: string; firstName: string; surname: string; admissionNo: string };
 
 type Props = {
   classId: string;
@@ -22,10 +22,34 @@ const MARKS: { key: AttendanceStatus; label: string; className: string }[] = [
   { key: "HALF_DAY", label: "H", className: "att-h" },
 ];
 
+type SortField = "name" | "admissionNo";
+
 export default function AttendanceRoster({ classId, date, students, initialMarks, canEdit }: Props) {
   const [marks, setMarks] = useState<Record<string, AttendanceStatus>>(initialMarks);
   const [pending, startTransition] = useTransition();
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [sortField, setSortField] = useState<SortField>("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  // Sorted entirely client-side — the roster is already fully loaded (one
+  // class, one day), no server round-trip needed the way a paginated list
+  // would.
+  const sortedStudents = useMemo(() => {
+    const sorted = [...students].sort((a, b) => {
+      const av = sortField === "name" ? studentName(a) : a.admissionNo;
+      const bv = sortField === "name" ? studentName(b) : b.admissionNo;
+      return av.localeCompare(bv);
+    });
+    return sortDir === "asc" ? sorted : sorted.reverse();
+  }, [students, sortField, sortDir]);
+
+  function toggleSort(field: SortField) {
+    if (sortField === field) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortField(field);
+      setSortDir("asc");
+    }
+  }
 
   const counts = useMemo(() => {
     let present = 0,
@@ -95,8 +119,12 @@ export default function AttendanceRoster({ classId, date, students, initialMarks
 
       <div className="card" style={{ padding: 0, flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         <div style={{ display: "grid", gridTemplateColumns: "2.4fr 1fr 1fr", padding: "13px 22px", borderBottom: "1px solid var(--line)", fontSize: 11, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-          <div>Student</div>
-          <div>Adm. No.</div>
+          <div onClick={() => toggleSort("name")} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: sortField === "name" ? "var(--marigold-deep)" : undefined }}>
+            Student <span style={{ fontSize: 9, opacity: sortField === "name" ? 1 : 0.35 }}>{sortField === "name" && sortDir === "desc" ? "▼" : "▲"}</span>
+          </div>
+          <div onClick={() => toggleSort("admissionNo")} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: sortField === "admissionNo" ? "var(--marigold-deep)" : undefined }}>
+            Adm. No. <span style={{ fontSize: 9, opacity: sortField === "admissionNo" ? 1 : 0.35 }}>{sortField === "admissionNo" && sortDir === "desc" ? "▼" : "▲"}</span>
+          </div>
           <div style={{ textAlign: "right" }}>Mark</div>
         </div>
 
@@ -104,13 +132,13 @@ export default function AttendanceRoster({ classId, date, students, initialMarks
           {students.length === 0 && (
             <div style={{ padding: 32, textAlign: "center", color: "var(--muted)", fontSize: 13.5 }}>No students in this class.</div>
           )}
-          {students.map((s) => (
+          {sortedStudents.map((s) => (
             <div key={s.id} style={{ display: "grid", gridTemplateColumns: "2.4fr 1fr 1fr", alignItems: "center", padding: "11px 22px", borderBottom: "1px solid var(--line)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <div style={{ width: 32, height: 32, borderRadius: "50%", background: avatarColorFor(s.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11.5, fontWeight: 700, color: "#fff", flex: "none" }}>
-                  {initials(s.name)}
+                  {initials(studentName(s))}
                 </div>
-                <span style={{ fontWeight: 600, fontSize: 13.5 }}>{s.name}</span>
+                <span style={{ fontWeight: 600, fontSize: 13.5 }}>{studentName(s)}</span>
               </div>
               <div className="mono" style={{ color: "var(--muted)", fontSize: 13 }}>
                 {s.admissionNo}

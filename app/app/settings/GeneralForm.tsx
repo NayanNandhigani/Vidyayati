@@ -1,12 +1,15 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState, useTransition } from "react";
 import { saveGeneral, type FormState } from "./actions";
+import { updateAdmissionNoPrefix } from "../students/depth-actions";
 
 const initialState: FormState = {};
 
-export default function GeneralForm({ school }: { school: { name: string; city: string | null; state: string | null } }) {
+export default function GeneralForm({ school }: { school: { name: string; city: string | null; state: string | null; admissionNoPrefix: string | null } }) {
   const [state, formAction, pending] = useActionState(saveGeneral, initialState);
+  const [prefix, setPrefix] = useState(school.admissionNoPrefix ?? "");
+  const [, startPrefixTransition] = useTransition();
 
   return (
     <div style={{ maxWidth: 600, display: "flex", flexDirection: "column", gap: 18 }}>
@@ -42,6 +45,22 @@ export default function GeneralForm({ school }: { school: { name: string; city: 
           )}
         </div>
       </form>
+
+      <div style={{ borderTop: "1px solid var(--line)", paddingTop: 18 }}>
+        <label className="field" style={{ maxWidth: 260 }}>
+          Admission number prefix
+          <input
+            className="in"
+            value={prefix}
+            onChange={(e) => setPrefix(e.target.value)}
+            onBlur={() => startPrefixTransition(() => updateAdmissionNoPrefix(prefix))}
+            placeholder="e.g. STU"
+          />
+        </label>
+        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4 }}>
+          Used only to pre-fill the "Suggest" button on the New Student form — admission numbers stay freely editable.
+        </div>
+      </div>
     </div>
   );
 }

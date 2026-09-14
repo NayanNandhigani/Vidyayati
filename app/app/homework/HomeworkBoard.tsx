@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { initials, daysUntil } from "@/lib/format";
 import { avatarColorFor, subjectStyleFor } from "@/lib/academic";
 import type { SubmissionStatus } from "@prisma/client";
 import { cycleSubmissionStatus, setSubmissionScore, remindPending } from "./actions";
+import { uploadHomeworkAttachment } from "./depth-actions";
 
 type Submission = { id: string; studentId: string; student: { name: string }; status: SubmissionStatus; score: number | null };
 type Assignment = {
@@ -16,6 +17,7 @@ type Assignment = {
   class: { grade: string; section: string };
   staff: { user: { name: string } };
   submissions: Submission[];
+  attachmentPath: string | null;
 };
 
 const subjectStyle = subjectStyleFor;
@@ -36,15 +38,40 @@ function bucketFor(a: Assignment): "Assigned" | "Due this week" | "Submitted" | 
   return "Assigned";
 }
 
-export default function HomeworkBoard({ assignments, initialSelectedId, canEdit }: { assignments: Assignment[]; initialSelectedId: string | null; canEdit: boolean }) {
+export default function HomeworkBoard({ assignments, initialSelectedId, canEdit, showAttachments }: { assignments: Assignment[]; initialSelectedId: string | null; canEdit: boolean; showAttachments: boolean }) {
   const [selectedId, setSelectedId] = useState(initialSelectedId ?? assignments[0]?.id ?? null);
   const [pending, startTransition] = useTransition();
   const [reminded, setReminded] = useState<number | null>(null);
+  const [viewMode, setViewMode] = useState<"status" | "date">("status");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  function pickAttachment() {
+    fileRef.current?.click();
+  }
+  function onAttachmentChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !selected) return;
+    const formData = new FormData();
+    formData.set("file", file);
+    startTransition(() => uploadHomeworkAttachment(selected.id, formData));
+  }
 
   const columns = useMemo(() => {
     const buckets: Record<string, Assignment[]> = { Assigned: [], "Due this week": [], Submitted: [], Graded: [] };
     for (const a of assignments) buckets[bucketFor(a)].push(a);
     return buckets;
+  }, [assignments]);
+
+  // "View past homework as per each date" — the same assignments grouped
+  // by due date instead of status, newest date first, for browsing what
+  // was assigned on/around a given day rather than by submission state.
+  const dateGroups = useMemo(() => {
+    const groups = new Map<string, Assignment[]>();
+    for (const a of assignments) {
+      const key = new Date(a.dueDate).toISOString().slice(0, 10);
+      groups.set(key, [...(groups.get(key) ?? []), a]);
+    }
+    return Array.from(groups.entries()).sort((a, b) => (a[0] < b[0] ? 1 : -1));
   }, [assignments]);
 
   const selected = assignments.find((a) => a.id === selectedId) ?? null;
@@ -74,8 +101,74 @@ export default function HomeworkBoard({ assignments, initialSelectedId, canEdit 
   }
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr) 300px", gap: 13, flex: 1, minHeight: 0 }}>
-      {(["Assigned", "Due this week", "Submitted", "Graded"] as const).map((col) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minHeight: 0 }}>
+      <div style={{ display: "flex", gap: 6 }}>
+        <span
+          onClick={() => setViewMode("status")}
+          className="pill"
+          style={{ cursor: "pointer", background: viewMode === "status" ? "var(--marigold)" : "var(--card)", color: viewMode === "status" ? "#fff" : "var(--ink2)", border: "1px solid var(--line)" }}
+        >
+          By status
+        </span>
+        <span
+          onClick={() => setViewMode("date")}
+          className="pill"
+          style={{ cursor: "pointer", background: viewMode === "date" ? "var(--marigold)" : "var(--card)", color: viewMode === "date" ? "#fff" : "var(--ink2)", border: "1px solid var(--line)" }}
+        >
+          By date
+        </span>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr) 300px", gap: 13, flex: 1, minHeight: 0 }}>
+      {viewMode === "date" ? (
+        <div style={{ gridColumn: "1 / 5", overflowY: "auto", display: "flex", flexDirection: "column", gap: 16, paddingRight: 4 }}>
+          {dateGroups.length === 0 && <div style={{ color: "var(--muted)", fontSize: 13 }}>No homework assigned yet.</div>}
+          {dateGroups.map(([dateKey, items]) => (
+            <div key={dateKey}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", marginBottom: 8 }}>
+                {new Date(dateKey).toLocaleDateString("en-IN", { weekday: "long", day: "2-digit", month: "short", year: "numeric" })}
+                <span className="mono" style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 600, color: "var(--faint)", background: "var(--line)", borderRadius: 100, padding: "1px 7px" }}>
+                  {items.length}
+                </span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 9 }}>
+                {items.map((a) => {
+                  const total = a.submissions.length;
+                  const submitted = a.submissions.filter((s) => s.status === "SUBMITTED" || s.status === "LATE").length;
+                  const style = subjectStyle(a.subject.name);
+                  const isSelected = a.id === selectedId;
+                  return (
+                    <div
+                      key={a.id}
+                      onClick={() => setSelectedId(a.id)}
+                      style={{
+                        background: "var(--card)",
+                        border: isSelected ? "1px solid var(--marigold)" : "1px solid var(--line)",
+                        boxShadow: isSelected ? "0 0 0 2px var(--marigold-tint), 0 0 0 1px var(--marigold) inset" : undefined,
+                        borderRadius: 10,
+                        padding: "10px 12px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                        <span style={{ fontSize: 10.5, fontWeight: 700, padding: "3px 9px", borderRadius: 6, background: style.bg, color: style.fg }}>{a.subject.name}</span>
+                        <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>
+                          {a.class.grade}-{a.class.section}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.3, marginBottom: 4 }}>{a.title}</div>
+                      <div className="mono" style={{ fontSize: 11, color: "var(--faint)" }}>
+                        {submitted}/{total} submitted
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        (["Assigned", "Due this week", "Submitted", "Graded"] as const).map((col) => (
         <div key={col} style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "2px 4px 10px" }}>
             <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>{col}</span>
@@ -136,7 +229,8 @@ export default function HomeworkBoard({ assignments, initialSelectedId, canEdit 
             {columns[col].length === 0 && <div style={{ fontSize: 12, color: "var(--faint)", padding: "8px 4px" }}>Nothing here.</div>}
           </div>
         </div>
-      ))}
+        ))
+      )}
 
       <div className="card" style={{ padding: 18, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
         {selected ? (
@@ -164,6 +258,26 @@ export default function HomeworkBoard({ assignments, initialSelectedId, canEdit 
                 <div className="in" style={{ lineHeight: 1.5 }}>
                   {selected.description}
                 </div>
+              </div>
+            )}
+            {showAttachments && (
+              <div className="field">
+                Attachment
+                <div className="in" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  {selected.attachmentPath ? (
+                    <a href={`/api/person-documents/${selected.attachmentPath}`} target="_blank" rel="noreferrer" style={{ color: "var(--marigold-deep)", fontWeight: 600, fontSize: 12.5 }}>
+                      View attachment
+                    </a>
+                  ) : (
+                    <span style={{ color: "var(--faint)", fontSize: 12.5 }}>No attachment</span>
+                  )}
+                  {canEdit && (
+                    <span onClick={pickAttachment} style={{ fontSize: 11.5, fontWeight: 700, color: "var(--marigold-deep)", cursor: "pointer" }}>
+                      {selected.attachmentPath ? "Replace" : "+ Attach file"}
+                    </span>
+                  )}
+                </div>
+                <input ref={fileRef} type="file" onChange={onAttachmentChosen} style={{ display: "none" }} />
               </div>
             )}
 
@@ -223,6 +337,7 @@ export default function HomeworkBoard({ assignments, initialSelectedId, canEdit 
         ) : (
           <div style={{ color: "var(--muted)", fontSize: 13.5 }}>No assignments yet.</div>
         )}
+      </div>
       </div>
     </div>
   );

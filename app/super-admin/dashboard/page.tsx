@@ -5,9 +5,9 @@ import { formatINR, formatDate } from "@/lib/format";
 import PlatformUsageChart from "./PlatformUsageChart";
 import RevenueTrendChart from "./RevenueTrendChart";
 import SalesPipelineFunnel from "./SalesPipelineFunnel";
+import LeadsFunnel from "./LeadsFunnel";
 import AccountHealthPanel, { type SchoolHealth } from "./AccountHealthPanel";
 import AttentionList, { type AttentionRow } from "./AttentionList";
-import ExpenseBreakdownChart from "../accounts/ExpenseBreakdownChart";
 
 // Live operational dashboard — never statically cache these numbers.
 export const dynamic = "force-dynamic";
@@ -90,8 +90,8 @@ export default async function SuperAdminDashboard({ searchParams }: { searchPara
     overdueInvoicesRaw,
     cohort90,
     pipelineRaw,
+    leadStageRaw,
     allPayments,
-    planMixRaw,
     liveSchools,
     studentCounts,
     lastLoginBySchool,
@@ -116,9 +116,9 @@ export default async function SuperAdminDashboard({ searchParams }: { searchPara
     db.subscriptionInvoice.findMany({ where: { dueDate: { lt: now }, status: { not: "PAID" } }, include: { school: true, payments: true } }),
     db.school.findMany({ where: { salesStage: "WON", onboardedOn: { gte: days90Ago } }, select: { status: true } }),
     db.school.groupBy({ by: ["salesStage"], _count: true }),
+    db.salesLead.groupBy({ by: ["stage"], _count: true }),
     db.subscriptionPayment.findMany({ select: { amount: true, paidOn: true } }),
-    db.school.groupBy({ by: ["plan"], where: { salesStage: "WON", status: { not: "CANCELLED" } }, _count: true }),
-    db.school.findMany({ where: { salesStage: "WON", status: { not: "CANCELLED" } }, select: { id: true, name: true, city: true, plan: true, status: true, relationshipManager: true, onboardedOn: true } }),
+    db.school.findMany({ where: { salesStage: "WON", status: { not: "CANCELLED" } }, select: { id: true, name: true, city: true, status: true, relationshipManager: true, onboardedOn: true } }),
     db.student.groupBy({ by: ["schoolId"], where: { status: "ACTIVE" }, _count: true }),
     db.activityLog.groupBy({ by: ["schoolId"], where: { type: "LOGIN", schoolId: { not: null } }, _max: { occurredAt: true } }),
     db.user.groupBy({ by: ["schoolId"], where: { schoolId: { not: null }, role: { in: ["STAFF", "PARENT"] } }, _count: true }),
@@ -199,6 +199,10 @@ export default async function SuperAdminDashboard({ searchParams }: { searchPara
   const pipelineCounts: Record<string, number> = {};
   pipelineRaw.forEach((r) => (pipelineCounts[r.salesStage] = r._count));
 
+  const leadStageCounts: Record<string, number> = {};
+  leadStageRaw.forEach((r) => (leadStageCounts[r.stage] = r._count));
+  const leadLostCount = leadStageCounts.LOST ?? 0;
+
   // --- Revenue trend (last 12 months) ----------------------------------------
   const monthStarts = Array.from({ length: 12 }, (_, i) => {
     const d = new Date(now.getFullYear(), now.getMonth() - 11 + i, 1);
@@ -208,10 +212,6 @@ export default async function SuperAdminDashboard({ searchParams }: { searchPara
     label,
     amount: allPayments.filter((p) => p.paidOn.getFullYear() === year && p.paidOn.getMonth() === month).reduce((s, p) => s + Number(p.amount), 0),
   }));
-
-  // --- Plan mix ---------------------------------------------------------------
-  const PLAN_LABEL: Record<string, string> = { STANDARD: "Standard", PREMIUM: "Premium" };
-  const planMixSlices = planMixRaw.map((p, i) => ({ label: PLAN_LABEL[p.plan] ?? p.plan, amount: p._count, color: i === 0 ? "var(--marigold)" : "var(--teal)" }));
 
   // --- Platform usage (engagement) ---------------------------------------------
   const usageTotalMap = new Map(usageTotalsRaw.map((r) => [`${r.schoolId}:${r.role}`, r._count]));
@@ -282,17 +282,22 @@ export default async function SuperAdminDashboard({ searchParams }: { searchPara
         </div>
 
         <div className="dash-grid-2" style={{ display: "grid", gap: 18, flex: "none" }}>
-          <div className="card" style={{ padding: 22, display: "flex", flexDirection: "column" }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Revenue trend</div>
-            <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 18 }}>Collected, last 12 months</div>
-            <RevenueTrendChart data={monthlyRevenue} />
+          <div className="card" style={{ padding: 22 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>Leads</div>
+              <Link href="/super-admin/leads" style={{ fontSize: 11.5, color: "var(--marigold-deep)", fontWeight: 600, textDecoration: "none" }}>
+                View board →
+              </Link>
+            </div>
+            <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 18 }}>Prospective schools, by stage — separate from the onboarding pipeline above</div>
+            <LeadsFunnel counts={leadStageCounts} lostCount={leadLostCount} />
           </div>
+        </div>
 
-          <div className="card" style={{ padding: 22, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Plan mix</div>
-            <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 18 }}>Live (non-cancelled) schools by plan</div>
-            <ExpenseBreakdownChart slices={planMixSlices} totalLabel="schools" formatAmount={(n) => String(n)} />
-          </div>
+        <div className="card" style={{ padding: 22, display: "flex", flexDirection: "column", flex: "none" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Revenue trend</div>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 18 }}>Collected, last 12 months</div>
+          <RevenueTrendChart data={monthlyRevenue} />
         </div>
 
         <div className="card" style={{ padding: 20, display: "flex", flexDirection: "column", height: 260, flex: "none" }}>
@@ -332,9 +337,8 @@ export default async function SuperAdminDashboard({ searchParams }: { searchPara
             <div style={{ fontSize: 12.5, color: "var(--muted)" }}>No schools onboarded yet.</div>
           ) : (
             <>
-              <div style={{ display: "grid", gridTemplateColumns: "1.8fr 0.9fr 0.7fr 1fr 1.1fr 0.9fr", fontSize: 11.5, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.04em", paddingBottom: 10, borderBottom: "1px solid var(--line)" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 0.7fr 1fr 1.1fr 0.9fr", fontSize: 11.5, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.04em", paddingBottom: 10, borderBottom: "1px solid var(--line)" }}>
                 <div>School</div>
-                <div>Plan</div>
                 <div>Students</div>
                 <div>Status</div>
                 <div>Owner</div>
@@ -344,9 +348,8 @@ export default async function SuperAdminDashboard({ searchParams }: { searchPara
                 const style = STATUS_STYLE[s.status];
                 const health = healthMap.get(s.id);
                 return (
-                  <Link key={s.id} href={`/super-admin/schools?school=${s.id}`} style={{ display: "grid", gridTemplateColumns: "1.8fr 0.9fr 0.7fr 1fr 1.1fr 0.9fr", alignItems: "center", padding: "12px 0", borderBottom: "1px solid var(--line)", fontSize: 13.5, textDecoration: "none", color: "inherit" }}>
+                  <Link key={s.id} href={`/super-admin/schools/${s.id}`} style={{ display: "grid", gridTemplateColumns: "2fr 0.7fr 1fr 1.1fr 0.9fr", alignItems: "center", padding: "12px 0", borderBottom: "1px solid var(--line)", fontSize: 13.5, textDecoration: "none", color: "inherit" }}>
                     <div style={{ fontWeight: 600 }}>{s.name}</div>
-                    <div style={{ color: "var(--muted)" }}>{s.plan === "STANDARD" ? "Standard" : "Premium"}</div>
                     <div className="mono">{studentCountMap.get(s.id) ?? 0}</div>
                     <div>
                       <span className="pill" style={{ background: style.bg, color: style.fg }}>

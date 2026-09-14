@@ -161,10 +161,13 @@ each fragment (`stu-`, `emp-`, `att-`, etc.) was a merge-collision
 convention for the flat-HTML prototype — you don't need to preserve that
 convention in real components, just the layout/behavior it encodes.
 
-Module list (School Admin/Staff/Parent portal): Dashboard, Students,
-Employees, Attendance, Exams, Homework, Timetable, Fees, Accounts,
-Admissions, Transport (includes a Hostel tab), Library, Events,
-Certificates, Communication, Reports, Settings.
+Module list (School Admin/Staff/Parent portal): Dashboard, Admissions,
+Academic Management, Students, Employees, Attendance, Exams, Homework,
+Timetable, Fees, Accounts, Transport, Hostel (its own module, not a
+Transport tab), Library, Inventory, Events, Certificates, Communication,
+Reports, Settings. (Current, actual list — see `ARCHITECTURE.md` for the
+authoritative one going forward; this file is the original design brief
+and won't be kept in lockstep with every subsequent module added.)
 
 Module list (Super Admin portal): Dashboard, Schools, Subscriptions &
 Billing, Reports, Settings.

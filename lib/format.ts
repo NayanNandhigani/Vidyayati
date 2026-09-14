@@ -22,3 +22,7 @@ export function daysUntil(date: Date): number {
   const ms = date.getTime() - Date.now();
   return Math.ceil(ms / (1000 * 60 * 60 * 24));
 }
+
+export function studentName(s: { firstName: string; surname: string }): string {
+  return `${s.firstName} ${s.surname}`;
+}

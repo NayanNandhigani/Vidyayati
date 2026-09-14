@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import Link from "next/link";
 import { createHomework, type HomeworkFormState } from "../actions";
 
@@ -9,11 +9,26 @@ const initialState: HomeworkFormState = {};
 export default function NewHomeworkForm({
   classes,
   subjects,
+  isAdmin,
+  staff,
 }: {
-  classes: { id: string; grade: string; section: string }[];
+  classes: { id: string; grade: string; section: string; classTeacherStaffId: string | null }[];
   subjects: { id: string; name: string }[];
+  isAdmin: boolean;
+  staff: { id: string; name: string }[];
 }) {
   const [state, formAction, pending] = useActionState(createHomework, initialState);
+  const [classId, setClassId] = useState("");
+  const [staffId, setStaffId] = useState("");
+
+  function onClassChange(id: string) {
+    setClassId(id);
+    // Default the "assigned by" picker to that class's own teacher when one
+    // is set — still overridable, and required when none is set (a School
+    // Admin has no staff record of their own to fall back to).
+    const cls = classes.find((c) => c.id === id);
+    setStaffId(cls?.classTeacherStaffId ?? "");
+  }
 
   return (
     <form action={formAction} style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 480 }}>
@@ -25,7 +40,7 @@ export default function NewHomeworkForm({
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         <label className="field">
           Class
-          <select className="in" name="classId" required defaultValue="">
+          <select className="in" name="classId" required value={classId} onChange={(e) => onClassChange(e.target.value)}>
             <option value="" disabled>
               Select class
             </option>
@@ -50,6 +65,22 @@ export default function NewHomeworkForm({
           </select>
         </label>
       </div>
+
+      {isAdmin && (
+        <label className="field">
+          Assigned by <span style={{ fontWeight: 400, color: "var(--muted)" }}>(which teacher this shows as)</span>
+          <select className="in" name="staffId" required value={staffId} onChange={(e) => setStaffId(e.target.value)}>
+            <option value="" disabled>
+              Select teacher
+            </option>
+            {staff.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
       <label className="field">
         Due date

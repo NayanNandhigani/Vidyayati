@@ -1,6 +1,11 @@
 import { CertificateType } from "@prisma/client";
 
-export const DEFAULT_TEMPLATE_BODY: Record<CertificateType, { label: string; description: string; title: string; body: string }> = {
+// Seed content for the 4 built-in certificate types only — used once,
+// when a new school's Certificates module is first opened and these
+// don't exist yet (see app/app/certificates/page.tsx's auto-provisioning).
+// CUSTOM templates have no default; a School Admin writes their own
+// label/title/body from scratch in the Certificate Builder panel.
+export const DEFAULT_TEMPLATE_BODY: Record<Exclude<CertificateType, "CUSTOM">, { label: string; description: string; title: string; body: string }> = {
   BONAFIDE: {
     label: "Bonafide / Study Certificate",
     description: "Confirms current class & enrolment",

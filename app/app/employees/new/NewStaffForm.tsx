@@ -35,6 +35,13 @@ export default function NewStaffForm() {
           <input className="in" name="department" placeholder="Academics" />
         </label>
       </div>
+      <label className="field">
+        Staff category
+        <select className="in" name="staffCategory" defaultValue="TEACHING">
+          <option value="TEACHING">Teaching</option>
+          <option value="NON_TEACHING">Non-teaching</option>
+        </select>
+      </label>
       <div style={{ fontSize: 12, color: "var(--muted)" }}>Default password: <span className="mono">12345</span> — the staff member can change it after logging in.</div>
 
       {state.error && (

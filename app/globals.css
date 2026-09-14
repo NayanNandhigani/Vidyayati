@@ -192,3 +192,40 @@ body {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* Printable documents (Contracts) — the page renders normally on screen
+   (inside the Super Admin shell, sidebar and all) but printing/"Save as
+   PDF" via the browser's print dialog should show only the document
+   itself. See app/super-admin/contracts/[id]/print/page.tsx. */
+
+.print-hide {
+  display: block;
+}
+
+.print-page {
+  background: #fff;
+}
+
+@media print {
+  .print-hide {
+    display: none !important;
+  }
+
+  .print-page {
+    padding: 0 !important;
+    margin: 0 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  body {
+    background: #fff !important;
+  }
+
+  @page {
+    size: A4;
+    margin: 18mm 16mm;
+  }
+}

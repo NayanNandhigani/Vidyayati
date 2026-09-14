@@ -3,6 +3,8 @@
 import { useActionState } from "react";
 import Link from "next/link";
 import { onboardSchool, type SchoolFormState } from "./actions";
+import AddressFields from "@/components/AddressFields";
+import ContactPersonFields from "@/components/ContactPersonFields";
 
 const initialState: SchoolFormState = {};
 
@@ -32,13 +34,21 @@ export default function OnboardForm() {
           State
           <input className="in" name="state" placeholder="e.g. Gujarat" />
         </label>
+
+        <div style={{ borderTop: "1px solid var(--line)", paddingTop: 11, marginTop: 4, fontSize: 11.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+          Registered address <span style={{ fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>(optional — can be added later)</span>
+        </div>
         <label className="field">
-          Plan
-          <select className="in" name="plan" defaultValue="STANDARD">
-            <option value="STANDARD">Standard</option>
-            <option value="PREMIUM">Premium</option>
-          </select>
+          Registration number
+          <input className="in mono" name="registrationNumber" placeholder="e.g. UDISE / affiliation number" />
         </label>
+        <AddressFields />
+
+        <div style={{ borderTop: "1px solid var(--line)", paddingTop: 11, marginTop: 4, fontSize: 11.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+          Contact person <span style={{ fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>(optional — can be added later)</span>
+        </div>
+        <ContactPersonFields />
+
         <div style={{ borderTop: "1px solid var(--line)", paddingTop: 11, marginTop: 4, fontSize: 11.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
           Initial admin login
         </div>

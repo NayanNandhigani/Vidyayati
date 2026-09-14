@@ -13,28 +13,41 @@ export async function createRoute(_prevState: FormState, formData: FormData): Pr
   const sdb = await getScopedDb();
 
   const name = formData.get("name");
-  const driverName = formData.get("driverName");
-  const vehicleNo = formData.get("vehicleNo");
-  const capacity = formData.get("capacity");
+  const vehicleId = formData.get("vehicleId");
+  const feeAmount = formData.get("feeAmount");
 
   if (typeof name !== "string" || !name.trim()) return { error: "Route name is required." };
+
+  const vehicleIdValue = typeof vehicleId === "string" && vehicleId ? vehicleId : null;
+  if (vehicleIdValue) {
+    const vehicle = await sdb.transportVehicle.findUnique({ where: { id: vehicleIdValue }, select: { id: true } });
+    if (!vehicle) return { error: "That vehicle could not be found." };
+  }
 
   const route = await sdb.transportRoute.create({
     data: scopedCreateData<Prisma.TransportRouteUncheckedCreateInput>({
       name: name.trim(),
-      driverName: typeof driverName === "string" && driverName ? driverName : null,
-      vehicleNo: typeof vehicleNo === "string" && vehicleNo ? vehicleNo : null,
-      capacity: typeof capacity === "string" && capacity ? Number(capacity) : null,
+      vehicleId: vehicleIdValue,
+      feeAmount: typeof feeAmount === "string" && feeAmount ? Number(feeAmount) : null,
     }),
   });
 
   revalidatePath("/app/transport");
-  redirect(`/app/transport?route=${route.id}`);
+  redirect(`/app/transport?tab=routes&route=${route.id}`);
+}
+
+export async function updateRouteVehicleAndFee(routeId: string, vehicleId: string | null, feeAmount: number | null) {
+  await requireModuleAccess("Transport", "EDIT");
+  const sdb = await getScopedDb();
+  if (vehicleId) await sdb.transportVehicle.findUniqueOrThrow({ where: { id: vehicleId }, select: { id: true } });
+  await sdb.transportRoute.update({ where: { id: routeId }, data: { vehicleId, feeAmount } });
+  revalidatePath("/app/transport");
 }
 
 export async function addStop(routeId: string, stopName: string, pickupTime: string) {
   await requireModuleAccess("Transport", "EDIT");
   const sdb = await getScopedDb();
+  await sdb.transportRoute.findUniqueOrThrow({ where: { id: routeId }, select: { id: true } });
   const count = await sdb.transportStop.count({ where: { routeId } });
 
   await sdb.transportStop.create({
@@ -49,38 +62,34 @@ export async function addStop(routeId: string, stopName: string, pickupTime: str
   revalidatePath("/app/transport");
 }
 
-export async function createRoom(_prevState: FormState, formData: FormData): Promise<FormState> {
+// ------------------------------------------------------- Student assignment
+
+/** Assigns (or re-assigns) a student to a route + one of its stops — upserts on studentId, the table's own primary key, since a student can only ever be on one route at a time. Capacity now lives on the route's vehicle, not the route itself. */
+export async function assignStudentToRoute(studentId: string, routeId: string, stopId: string) {
   await requireModuleAccess("Transport", "EDIT");
   const sdb = await getScopedDb();
 
-  const roomNo = formData.get("roomNo");
-  const capacity = formData.get("capacity");
-
-  if (typeof roomNo !== "string" || !roomNo.trim() || typeof capacity !== "string" || !capacity) {
-    return { error: "Room number and capacity are required." };
+  const route = await sdb.transportRoute.findUniqueOrThrow({ where: { id: routeId }, include: { assignments: true, vehicle: true } });
+  await sdb.student.findUniqueOrThrow({ where: { id: studentId }, select: { id: true } });
+  await sdb.transportStop.findUniqueOrThrow({ where: { id: stopId }, select: { id: true } });
+  const alreadyOnThisRoute = route.assignments.some((a) => a.studentId === studentId);
+  const capacity = route.vehicle?.capacity ?? null;
+  if (!alreadyOnThisRoute && capacity !== null && route.assignments.length >= capacity) {
+    throw new Error(`${route.name} is at full capacity.`);
   }
 
-  const room = await sdb.hostelRoom.create({
-    data: scopedCreateData<Prisma.HostelRoomUncheckedCreateInput>({ roomNo: roomNo.trim(), capacity: Number(capacity) }),
+  await sdb.studentTransportAssignment.upsert({
+    where: { studentId },
+    update: { routeId, stopId },
+    create: scopedCreateData<Prisma.StudentTransportAssignmentUncheckedCreateInput>({ studentId, routeId, stopId }),
   });
 
   revalidatePath("/app/transport");
-  redirect(`/app/transport?tab=hostel&room=${room.id}`);
 }
 
-export async function allocateRoom(roomId: string, studentId: string) {
+export async function unassignStudentFromRoute(studentId: string) {
   await requireModuleAccess("Transport", "EDIT");
   const sdb = await getScopedDb();
-
-  const [room, allocatedCount] = await Promise.all([
-    sdb.hostelRoom.findUniqueOrThrow({ where: { id: roomId } }),
-    sdb.hostelAllocation.count({ where: { roomId } }),
-  ]);
-  if (allocatedCount >= room.capacity) throw new Error("Room is at full capacity.");
-
-  await sdb.hostelAllocation.create({
-    data: scopedCreateData<Prisma.HostelAllocationUncheckedCreateInput>({ roomId, studentId, dateFrom: new Date() }),
-  });
-
+  await sdb.studentTransportAssignment.delete({ where: { studentId } }).catch(() => {});
   revalidatePath("/app/transport");
 }

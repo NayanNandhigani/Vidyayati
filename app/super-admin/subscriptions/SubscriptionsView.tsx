@@ -8,7 +8,6 @@ type Row = {
   invoiceId: string;
   schoolId: string;
   schoolName: string;
-  plan: string;
   billingPeriod: string;
   amount: number;
   paidAmount: number;
@@ -33,7 +32,7 @@ function rowStatus(r: Row): keyof typeof STATUS_STYLE {
   return "PENDING";
 }
 
-export default function SubscriptionsView({ rows, planBreakdown }: { rows: Row[]; planBreakdown: { plan: string; count: number; total: number; color: string }[] }) {
+export default function SubscriptionsView({ rows }: { rows: Row[] }) {
   const [selectedId, setSelectedId] = useState<string | null>(rows.find((r) => rowStatus(r) === "OVERDUE")?.invoiceId ?? null);
   const selected = rows.find((r) => r.invoiceId === selectedId);
 
@@ -44,9 +43,8 @@ export default function SubscriptionsView({ rows, planBreakdown }: { rows: Row[]
         <div style={{ fontSize: 14, fontWeight: 700 }}>Subscription ledger</div>
         <div style={{ fontSize: 12.5, color: "var(--muted)" }}>{rows.length} invoices</div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 0.7fr 1fr 1.05fr 0.95fr 0.95fr 0.95fr", fontSize: 11, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.04em", paddingBottom: 10, borderBottom: "1px solid var(--line)" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "2.4fr 1fr 1.05fr 0.95fr 0.95fr 0.95fr", fontSize: 11, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.04em", paddingBottom: 10, borderBottom: "1px solid var(--line)" }}>
         <div>School</div>
-        <div>Plan</div>
         <div>Amount / yr</div>
         <div>Status</div>
         <div>Due date</div>
@@ -66,7 +64,7 @@ export default function SubscriptionsView({ rows, planBreakdown }: { rows: Row[]
               onClick={() => setSelectedId(r.invoiceId)}
               style={{
                 display: "grid",
-                gridTemplateColumns: "2fr 0.7fr 1fr 1.05fr 0.95fr 0.95fr 0.95fr",
+                gridTemplateColumns: "2.4fr 1fr 1.05fr 0.95fr 0.95fr 0.95fr",
                 alignItems: "center",
                 padding: "12px 0",
                 borderBottom: "1px solid var(--line)",
@@ -76,7 +74,6 @@ export default function SubscriptionsView({ rows, planBreakdown }: { rows: Row[]
               }}
             >
               <div style={{ fontWeight: 600 }}>{r.schoolName}</div>
-              <div style={{ color: "var(--muted)" }}>{r.plan}</div>
               <div className="mono" style={{ color: isOverdue ? "var(--critical)" : undefined, fontWeight: isOverdue ? 600 : 400 }}>
                 {formatINR(r.amount)}
               </div>
@@ -101,21 +98,6 @@ export default function SubscriptionsView({ rows, planBreakdown }: { rows: Row[]
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 14, minHeight: 0 }}>
-        <div className="card" style={{ padding: "18px 20px", flex: "none" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Revenue by plan tier</div>
-          {planBreakdown.map((p, i) => (
-            <div key={p.plan} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: i === planBreakdown.length - 1 ? "none" : "1px solid var(--line)" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: p.color, display: "inline-block" }} />
-                {p.plan} · {p.count} school{p.count === 1 ? "" : "s"}
-              </div>
-              <div className="mono" style={{ fontSize: 13, fontWeight: 600 }}>
-                {formatINR(p.total)}
-              </div>
-            </div>
-          ))}
-        </div>
-
         <div className="card" style={{ padding: 20, display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
           {selected ? (
             <RecordPaymentPanel

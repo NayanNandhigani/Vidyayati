@@ -1,46 +1,66 @@
 # Vidya Yati
 
-Multi-tenant school/kindergarten management SaaS. See **`CLAUDE.md`** for
-the full product/design brief before building anything — this file is just
-setup steps.
+Multi-tenant school/kindergarten management SaaS. See **`CLAUDE.md`** for the
+product/design brief and **`ARCHITECTURE.md`** for how the codebase is
+actually put together (routing, auth, multi-tenancy, permissions, data
+model) — this file is just setup steps.
 
 ## First-time setup
 
 ```bash
 npm install
 
-# Postgres — quickest way to get one running locally is Docker:
-docker run --name vidya-yati-db -e POSTGRES_PASSWORD=postgres -p 5432:5432 -d postgres:16
-
 cp .env.example .env
-# edit .env: DATABASE_URL (matches the Docker command above by default),
-# AUTH_SECRET (generate with `openssl rand -base64 32`)
+# edit .env: AUTH_SECRET (generate with `openssl rand -base64 32`)
+# DATABASE_URL is already set to match the local Postgres started below
 
-npx prisma validate      # confirm the schema is well-formed
-npx prisma migrate dev   # creates the database tables
+npm run db:local          # starts a local Postgres via embedded-postgres —
+                           # leave this running in its own terminal, no
+                           # Docker or system install needed
 
-npm run dev              # http://localhost:3000
+npx prisma validate       # confirm the schema is well-formed
+npx prisma migrate deploy # applies every migration
+npm run db:seed           # optional — realistic demo data for one school
+
+npm run dev               # http://localhost:3000
 ```
 
-## What's already here
+Default logins after seeding (see `prisma/seed.ts`): Super Admin is
+`vidyayati` / `12345`; every seeded School Admin/Staff/Parent account is
+also `12345`. **This default password is a known, tracked gap** — see
+`ARCHITECTURE.md` → "Auth and session."
 
-- `prisma/schema.prisma` — the full data model (41 tables), written from
-  the design phase's data dictionary. Not yet run against a real database
-  — `prisma migrate dev` above is the first real test of it.
+## What's here
+
+This is a working, actively-developed application, not a scaffold — auth,
+multi-tenancy, and every module in `CLAUDE.md`'s module list have at least
+a full first pass built and running. Specifically:
+
+- `prisma/schema.prisma` — the full data model (99 models, 60 enums),
+  under active migration. `npx prisma migrate status` should always report
+  "up to date" against a freshly-seeded local database.
+- `app/app/*` — the school portal (Dashboard, Admissions, Academic
+  Management, Students, Employees, Attendance, Exams, Homework, Timetable,
+  Fees, Accounts, Transport, Hostel, Library, Inventory, Events,
+  Certificates, Communication, Reports, Settings).
+- `app/super-admin/*` — the platform portal Vidya Yati's own team uses
+  (Schools, Subscriptions & Billing, Reports, Settings).
 - `app/globals.css`, `tailwind.config.ts` — the approved design tokens
-  (colors, fonts), copied exactly from the clickable prototype.
-- `design-reference/sections/` — one HTML/CSS fragment pair per screen
-  from the clickable prototype the client already reviewed. This is the
-  interaction spec: what each screen shows, what clicking things does,
-  what the different states look like. Open a `.section.html` file in a
-  browser (or via the published prototype link in `CLAUDE.md`) to see it
-  rendered, or read the HTML/CSS directly.
+  (colors, fonts).
+- `design-reference/sections/` — the original clickable-prototype
+  fragments the client reviewed during design. Still useful as an
+  interaction reference for a screen's original intent, though several
+  modules have since been rebuilt with additional functionality beyond
+  what's shown there.
 - `design-reference/data-model.html` — the plain-language version of the
-  Prisma schema, open it in a browser for field-by-field descriptions.
+  *original* 41-model data dictionary from the design phase. The schema
+  has grown substantially since; treat this file as historical context,
+  not a current reference (see `ARCHITECTURE.md` → "Data model").
 
-## What's not here yet
+## Active development
 
-Everything else — this is a scaffold, not a working app. No auth is wired
-up, no routes beyond the placeholder homepage exist, and the schema hasn't
-been validated against a running Postgres instance. `CLAUDE.md` has a
-suggested build order.
+An "Architecture V1" hardening pass is in progress on the `architecture-v1`
+branch — see that branch's roadmap doc for the full schedule (multi-tenancy
+audit, Enrollment/Grade modeling, testing, CI/CD, documentation). It does
+not add online payments or WhatsApp/SMS/email — both stay explicitly
+out of scope per `CLAUDE.md`.

@@ -5,27 +5,12 @@ import { updateSchool, type ManageFormState } from "./actions";
 
 const initialState: ManageFormState = {};
 
-const PLAN_OPTIONS: { value: string; label: string }[] = [
-  { value: "STANDARD", label: "Standard" },
-  { value: "PREMIUM", label: "Premium" },
-];
-
-const STATUS_OPTIONS: { value: string; label: string }[] = [
-  { value: "TRIAL", label: "Trial" },
-  { value: "ACTIVE", label: "Active" },
-  { value: "EXPIRING", label: "Expiring soon" },
-  { value: "OVERDUE", label: "Overdue" },
-  { value: "CANCELLED", label: "Cancelled" },
-];
-
 type School = {
   id: string;
   name: string;
   code: string;
   city: string | null;
   state: string | null;
-  plan: string;
-  status: string;
 };
 
 export default function SchoolEditForm({ school }: { school: School }) {
@@ -65,28 +50,6 @@ export default function SchoolEditForm({ school }: { school: School }) {
         <label className="field">
           State
           <input className="in" name="state" defaultValue={school.state ?? ""} />
-        </label>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <label className="field">
-          Plan
-          <select className="in" name="plan" defaultValue={school.plan}>
-            {PLAN_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          Status
-          <select className="in" name="status" defaultValue={school.status}>
-            {STATUS_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
         </label>
       </div>
 

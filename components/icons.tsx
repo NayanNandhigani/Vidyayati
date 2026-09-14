@@ -164,10 +164,65 @@ export const IconReceipt = (p: SVGProps<SVGSVGElement>) => (
   </Icon>
 );
 
+export const IconFileText = (p: SVGProps<SVGSVGElement>) => (
+  <Icon {...p}>
+    <path d="M6.5 3.5h8L18.5 8v12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-15.5a1 1 0 0 1 1-1Z" />
+    <path d="M14 3.5V8h4.5" />
+    <path d="M8.3 12.3h7.4M8.3 15.6h7.4M8.3 18.9h4.5" />
+  </Icon>
+);
+
+export const IconPaperclip = (p: SVGProps<SVGSVGElement>) => (
+  <Icon {...p}>
+    <path d="M16.8 7.3 9.4 14.7a3 3 0 1 0 4.24 4.24l7.1-7.1a5 5 0 1 0-7.07-7.07l-7.1 7.1a7 7 0 1 0 9.9 9.9" />
+  </Icon>
+);
+
+export const IconTarget = (p: SVGProps<SVGSVGElement>) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="8.5" />
+    <circle cx="12" cy="12" r="5" />
+    <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+  </Icon>
+);
+
+export const IconTag = (p: SVGProps<SVGSVGElement>) => (
+  <Icon {...p}>
+    <path d="M12.5 3.5h5A2 2 0 0 1 19.5 5.5v5a2 2 0 0 1-.6 1.4l-8 8a2 2 0 0 1-2.8 0l-5-5a2 2 0 0 1 0-2.8l8-8a2 2 0 0 1 1.4-.6Z" />
+    <circle cx="15.5" cy="7.5" r="1.4" />
+  </Icon>
+);
+
+export const IconLock = (p: SVGProps<SVGSVGElement>) => (
+  <Icon {...p}>
+    <rect x="5" y="10.5" width="14" height="10" rx="1.8" />
+    <path d="M8 10.5V7a4 4 0 0 1 8 0v3.5" />
+    <circle cx="12" cy="15" r="1.4" />
+  </Icon>
+);
+
 export const IconLogOut = (p: SVGProps<SVGSVGElement>) => (
   <Icon {...p}>
     <path d="M9 20.5H5.6a1.6 1.6 0 0 1-1.6-1.6V5.1A1.6 1.6 0 0 1 5.6 3.5H9" />
     <path d="M15.5 16.5 20 12l-4.5-4.5" />
     <path d="M20 12H9" />
+  </Icon>
+);
+
+export const IconBox = (p: SVGProps<SVGSVGElement>) => (
+  <Icon {...p}>
+    <path d="M3.5 8 12 3.5 20.5 8 12 12.5 3.5 8Z" />
+    <path d="M3.5 8v9L12 21.5 20.5 17V8" />
+    <path d="M12 12.5V21.5" />
+  </Icon>
+);
+
+export const IconBed = (p: SVGProps<SVGSVGElement>) => (
+  <Icon {...p}>
+    <path d="M3 19v-8.5A1.5 1.5 0 0 1 4.5 9H11v4" />
+    <path d="M21 19v-4a2 2 0 0 0-2-2h-6a2 2 0 0 0-2 2v4" />
+    <circle cx="6.5" cy="9.8" r="1.4" />
+    <path d="M3 16h18" />
+    <path d="M3 19v1.5M21 19v1.5" />
   </Icon>
 );

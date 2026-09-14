@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { getScopedDb, scopedCreateData } from "@/lib/tenant-db";
 import { requireModuleAccess } from "@/lib/permissions";
+import { studentName } from "@/lib/format";
 
 export type PaymentFormState = { error?: string; success?: boolean };
 
@@ -42,6 +43,10 @@ export async function recordPayment(_prevState: PaymentFormState, formData: Form
   }
 
   const alreadyPaid = target.payments.reduce((s, p) => s + Number(p.amount), 0);
+  const remaining = Number(target.amount) - alreadyPaid;
+  if (amount > remaining) {
+    return { error: `This payment exceeds the outstanding balance for this installment (₹${remaining.toFixed(2)} remaining).` };
+  }
   const status = alreadyPaid + amount >= Number(target.amount) ? "PAID" : "PARTIAL";
 
   await sdb.$transaction([
@@ -59,7 +64,7 @@ export async function recordPayment(_prevState: PaymentFormState, formData: Form
     sdb.accountsTransaction.create({
       data: scopedCreateData<Prisma.AccountsTransactionUncheckedCreateInput>({
         date: paidOn,
-        description: `Fee payment — ${student.name} (${student.class.grade}-${student.class.section})`,
+        description: `Fee payment — ${studentName(student)} (${student.class.grade}-${student.class.section})`,
         category: "Fees",
         source: "AUTO_FEES",
         type: "INCOME",

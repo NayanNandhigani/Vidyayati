@@ -20,14 +20,26 @@ export default auth((req) => {
     return NextResponse.redirect(redirectUrl);
   }
 
-  // A Super Admin session has no schoolId and should never see the school
-  // portal; a school-portal session should never reach Super Admin routes.
-  if (isLoggedIn && isSuperAdminRoute && role !== "SUPER_ADMIN") {
+  // A Super Admin / platform staff session has no schoolId and should never
+  // see the school portal; a school-portal session should never reach
+  // Super Admin routes.
+  const isPlatformRole = role === "SUPER_ADMIN" || role === "PLATFORM_STAFF";
+  if (isLoggedIn && isSuperAdminRoute && !isPlatformRole) {
     return NextResponse.redirect(new URL("/app/dashboard", nextUrl));
   }
 
-  if (isLoggedIn && isAppRoute && role === "SUPER_ADMIN") {
+  if (isLoggedIn && isAppRoute && isPlatformRole) {
     return NextResponse.redirect(new URL("/super-admin/dashboard", nextUrl));
+  }
+
+  // Every account defaults to mustChangePassword: true (see prisma/schema.prisma's
+  // User.mustChangePassword) so a fresh login/staff/parent account can never
+  // silently stay on whatever password it was created with. Trap the session
+  // on a dedicated change-password route — plain pathname comparison, not a
+  // query param, so it can't be bypassed by editing the URL.
+  const changePasswordPath = isSuperAdminRoute ? "/super-admin/change-password" : "/app/change-password";
+  if (isLoggedIn && req.auth?.user?.mustChangePassword && nextUrl.pathname !== changePasswordPath) {
+    return NextResponse.redirect(new URL(changePasswordPath, nextUrl));
   }
 
   // Expose the current pathname to Server Components (app/app/layout.tsx uses
