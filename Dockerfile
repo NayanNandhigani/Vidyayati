@@ -42,7 +42,6 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/next.config.js ./next.config.js
-COPY --from=builder /app/instrumentation.ts ./instrumentation.ts
 
 RUN chmod +x ./scripts/migrate.sh \
  && mkdir -p ./DATA/uploads \
