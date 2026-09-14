@@ -26,9 +26,11 @@
     "exceljs": "^4.4.0",
     "next": "^15.1.0",
     "next-auth": "^5.0.0-beta.25",
+    "prisma": "^6.2.0",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "tsx": "^4.19.2",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -42,9 +44,7 @@
     "eslint": "^9.18.0",
     "eslint-config-next": "^15.1.0",
     "postcss": "^8.4.49",
-    "prisma": "^6.2.0",
     "tailwindcss": "^3.4.17",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   },
   "allowScripts": {
