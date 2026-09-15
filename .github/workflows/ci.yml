@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # Placeholder values only — nothing here is a real secret. Prisma's
+      # schema validation requires DATABASE_URL to be *set* (it doesn't
+      # need to be reachable), and `next build` never touches the DB at
+      # build time since every route in this app is server-rendered on
+      # demand, not statically generated — see DEPLOYMENT.md.
+      DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
+      AUTH_SECRET: "ci-placeholder-secret-not-used-at-runtime"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx prisma validate
+
+      - run: npm run lint
+
+      - run: npm run build
