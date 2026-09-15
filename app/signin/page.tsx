@@ -8,7 +8,6 @@ import LoginForm from "./LoginForm";
 export const dynamic = "force-dynamic";
 
 export default function LoginPage() {
-  console.log("[page-debug] rendering /signin");
   return (
     <main
       style={{

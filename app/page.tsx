@@ -23,7 +23,6 @@ const STATS = [
 export const dynamic = "force-dynamic";
 
 export default function MarketingHome() {
-  console.log("[page-debug] rendering /");
   return (
     <div style={{ background: "#0a0e1a", color: "#e8ebf5", minHeight: "100dvh" }}>
       <header

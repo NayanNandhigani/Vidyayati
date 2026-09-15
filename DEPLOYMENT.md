@@ -1,10 +1,11 @@
 # Deployment — Vidya Yati
 
-Deployment-readiness audit, current as of 2026-09-15. This documents the
-current deployment path, what was actually verified (and how, given the
-constraints of the auditing environment), what's still broken or
-unverified, and one open risk that needs a product decision rather than a
-code fix.
+Deployment-readiness audit, current as of 2026-09-15 (updated same day in
+a follow-up round that resolved the redirect-loop item originally flagged
+as this audit's top blocker). This documents the current deployment path,
+what was actually verified (and how, given the constraints of the
+auditing environment), what's still broken or unverified, and one open
+risk that needs a product decision rather than a code fix.
 
 ## Current deployment path
 
@@ -26,7 +27,8 @@ code fix.
 - **Health check**: `railway.json` points at `/api/health`
   (`app/api/health/route.ts`) — a dependency-free `200 OK` with no auth/DB
   involved, specifically so deploy-gating never depends on app logic (see
-  "Known active issue" below for why that mattered).
+  the `/login`→`/signin` investigation write-up below for why that
+  mattered).
 
 ## What was verified
 
@@ -102,12 +104,13 @@ documented-but-unused env vars found.**
 ### CI (`.github/workflows/`)
 
 None existed. Added `.github/workflows/ci.yml` — runs on every PR (and
-pushes to `main`): `npx prisma validate`, `npm run lint`, `npm run build`,
-using placeholder (non-secret) `DATABASE_URL`/`AUTH_SECRET` values since
-`prisma validate` requires the var to be set and it costs nothing to set
-the same placeholders for `build`. Kept intentionally minimal per the
-brief — no test step, since there's no test suite yet (Architecture V1
-status already tracks that as deferred Phase 27).
+pushes to `main`): `npx prisma validate`, `npm run lint`, `npm test`,
+`npm run build`, using placeholder (non-secret) `DATABASE_URL`/
+`AUTH_SECRET` values since `prisma validate` requires the var to be set
+and it costs nothing to set the same placeholders for `build`. The test
+step was added in a follow-up round once a Vitest suite landed on this
+branch via a merge from `claude/busy-faraday-y5460a` (67 tests across 5
+files, all passing).
 
 Getting this working surfaced a real, separate gap: **`npm run lint` was
 non-functional before this change.** No `.eslintrc.json` (or any ESLint
@@ -148,28 +151,86 @@ Next.js 15→16 migration.
 - **`docker build .` itself was never run** (no daemon in this sandbox).
   Every command inside it was verified natively instead (see above). Run
   it for real once, before the next deploy, as final confirmation.
-- **Active, unresolved production bug in the login flow** — not
-  introduced by this audit and not touched by it, but directly relevant
-  to deployment readiness since it affects every user's ability to sign
-  in. Recent commit history (`e95cd67`, `b18cfe6`, `e9a9722`) shows an
-  in-progress investigation into a redirect loop on `/login`: a genuine
-  `307 Location: /login` self-redirect was observed in production via
-  `curl`, with no code path found that could produce it after review. The
-  route was renamed `/login` → `/signin` (with a 301 redirect for old
-  links) to sidestep a suspected stale-cache issue tied to the old
-  hostname+path, and a dedicated dependency-free `/api/health` route was
-  added specifically to stop this from blocking deploy health checks.
-  **This is still open**: `middleware.ts`, `app/page.tsx`,
-  `app/signin/page.tsx`, and `next.config.js` all still carry `TEMP
-  DEBUG` `console.log` statements and a comment noting `next.config.js`'s
-  `headers()` was removed "to isolate whether it's interacting badly with
-  redirects()" — i.e., someone is mid-investigation. I left this alone
-  rather than touching code someone else is actively debugging, but
-  flagging it here since it's the single most user-facing thing standing
-  between this app and being genuinely production-ready.
 - **CI is new and unproven on real GitHub Actions runners** — validated
   every step locally with the same commands, but the workflow itself
   hasn't executed on `actions/checkout` + `actions/setup-node` yet.
+
+### `/login`→`/signin` redirect-loop investigation — resolved (statically); one thing still needs a live deploy to fully confirm
+
+This was the audit's top blocker; a follow-up round investigated and
+closed it out. Recap of what was found and fixed:
+
+**Application-level cause: ruled out.** Re-read `app/signin/page.tsx`,
+`app/signin/actions.ts`, `auth.config.ts`, and `middleware.ts` end to end.
+`middleware.ts`'s matcher (`["/app/:path*", "/super-admin/:path*"]`)
+never touches `/signin` or `/login` — it structurally cannot produce this
+redirect. The sign-in flow itself is a plain form POST to a server action
+(`loginAction`) with no client-side `callbackUrl` redirect logic and no
+`signIn()` call with `redirect: true` on the GET path — there is no
+in-app code path that could make `GET /signin` redirect anywhere, let
+alone to itself. `app/signin/page.tsx` already had `export const dynamic
+= "force-dynamic"` from the prior round, so it wasn't even a candidate
+for build-time static prerendering.
+
+**Root cause, on the balance of evidence: a browser-level permanent-
+redirect cache, not a server-side loop.** The `/login`→`/signin` redirect
+in `next.config.js` was declared `permanent: true` (a 308). Browsers
+cache 301/308 redirects **indefinitely, client-side, regardless of any
+`Cache-Control` header the server sends** — a behavior no server-side fix
+can undo for a client that already cached it. This matches every
+observed symptom exactly: it persisted across redeploys (a redeploy
+rebuilds the container, not a visitor's browser cache), it was tied to
+one specific hostname (`vidyayati-production.up.railway.app`, previously
+used by a now-deleted project that "really did have this exact
+redirect-loop bug on old code" per the original investigation's commit
+message), and it produced "zero React render evidence" (a cached
+redirect is served entirely from the browser's own cache — the request
+for `/signin` never reaches the server or the React tree at all).
+
+**Fixes applied:**
+1. `next.config.js`: changed the `/login`→`/signin` redirect from
+   `permanent: true` (308) to `permanent: false` (307) — 307s are not
+   cached by browsers by default, so a mistake here (or a future one on
+   any other redirect) can't get stuck the same way again.
+2. `next.config.js`: restored `headers()`, scoped narrowly to `/signin`
+   and `/api/auth/:path*` (not the wide/global scope hinted at in the
+   removed version) — `Cache-Control: no-store, must-revalidate` on both,
+   as defense-in-depth against any layer trying to cache a fresh response
+   in the future.
+3. Removed the `TEMP DEBUG` `console.log` statements from
+   `middleware.ts`, `app/page.tsx`, and `app/signin/page.tsx` — this
+   round is the investigation's conclusion they were left pending.
+
+**Verified locally** (`next build && next start`, real `curl` against the
+running server — as close to a real repro as this sandbox allows without
+a live Railway deploy):
+- `curl -D- /login` → `307 Temporary Redirect`, `Location: /signin`, no
+  `Refresh` header artifact.
+- `curl -D- /signin` → `200 OK`, `Cache-Control: no-store, must-revalidate`,
+  real rendered HTML body, no debug logging anywhere in the response.
+- `curl -D- /api/auth/session` → `200 OK`, also carries `no-store` (plus
+  NextAuth's own `expires: 0`/`pragma: no-cache`).
+- **One concrete discovery worth recording**: `headers()` rules do
+  **not** apply to a response served by `redirects()` — confirmed by
+  curling `/login` and seeing no `Cache-Control` header at all, even with
+  a matching `headers()` rule in place. I removed that dead rule from the
+  config rather than leave a header declaration that silently does
+  nothing. `/login`'s actual protection is the non-permanent redirect
+  (fix #1), not a response header.
+- `npm run lint`, `npm test` (67/67 passing), and `npm run build` all
+  pass with these changes.
+
+**What this doesn't (and can't) confirm without a live deploy**: whether
+the *original* production report was actually this exact browser-cache
+mechanism, versus something at a CDN/reverse-proxy layer in front of
+Railway (if a custom domain ever sat behind e.g. Cloudflare) independently
+caching the old 308. There is still no live Railway project under this
+account (confirmed again this round), so there's nothing to deploy this
+to and re-curl for a real repro. **If the loop is ever reported again
+after this fix ships**, the next step is checking for a CDN/custom-domain
+layer in front of Railway and purging its cache there — that's
+infrastructure outside this repo, not something further code changes here
+can reach.
 
 ## Storage / persistent volume risk (point 4 — flagging, not fixing)
 
@@ -228,17 +289,26 @@ the first real school's data is expected to survive a redeploy.
    survive a redeploy on the current Railway config. Needs a Volume
    attached (quick) or an S3/R2 migration (correct long-term); either is
    a decision for the Team Leader/user, not something I implemented.
-2. **Unresolved `/login`→`/signin` redirect-loop investigation** — still
-   open, debug logging still in place, directly affects the login flow
-   every user depends on.
-3. **`docker build .` has never actually been run** — every underlying
+2. **`docker build .` has never actually been run** — every underlying
    command was verified natively, but the real Dockerfile build itself
    is still unproven end-to-end.
 
+**Resolved this round:**
+
+3. **`/login`→`/signin` redirect-loop investigation** — root-caused
+   (browser-side permanent-redirect caching, not a server loop),
+   application code ruled out end-to-end, fixed (307 instead of 308,
+   scoped `no-store` headers restored), debug logging removed, and
+   verified via a real local `next build && next start` + `curl` repro.
+   See "What's broken or unverified" above for the one piece that still
+   genuinely needs a live Railway deploy to fully close out (a
+   CDN/custom-domain layer, if one ever existed, is outside this repo's
+   reach).
+
 **Nice-to-haves / lower priority:**
 
-4. New CI workflow (`.github/workflows/ci.yml`) is unproven on real
-   GitHub Actions runners — first PR against this branch will be the
+4. New/updated CI workflow (`.github/workflows/ci.yml`) is unproven on
+   real GitHub Actions runners — first PR against this branch will be the
    real test.
 5. `20260829000000_remove_school_plan` migration lacks the
    safety-justification comment every other destructive migration has —

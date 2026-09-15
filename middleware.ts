@@ -8,9 +8,6 @@ const { auth } = NextAuth(authConfig);
 
 export default auth((req) => {
   const { nextUrl } = req;
-  // TEMP DEBUG: prove whether middleware actually runs for this path in
-  // production — remove once the redirect-loop root cause is found.
-  console.log(`[middleware-debug] invoked for ${nextUrl.pathname}`);
   const isLoggedIn = !!req.auth;
   const role = req.auth?.user?.role;
 
