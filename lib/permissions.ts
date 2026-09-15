@@ -16,7 +16,7 @@ const LEVEL_RANK: Record<AccessLevel, number> = {
  * session is missing or access is insufficient.
  *
  * `classId`, when the module is one of the class-scoped ones (Students,
- * Attendance, Exams, Homework, Timetable), checks access to that specific
+ * Attendance, Exams, Homework, Timetable, Teaching), checks access to that specific
  * class. Resolution order: a school-wide row (StaffPermission.classId ===
  * null) for the module wins regardless of which class was requested — an
  * admin granting blanket access to a module shouldn't need one row per

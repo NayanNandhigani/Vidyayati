@@ -30,6 +30,7 @@ export const AUDITED_MODELS = new Set([
   "Attendance",
   "HostelAllocation",
   "Exam",
+  "SyllabusTopic",
 ]);
 
 export const AUDITED_MODEL_LABEL: Record<string, string> = {
@@ -44,6 +45,7 @@ export const AUDITED_MODEL_LABEL: Record<string, string> = {
   Attendance: "Attendance",
   HostelAllocation: "Hostel Allocation",
   Exam: "Exam",
+  SyllabusTopic: "Syllabus Topic",
 };
 
 const FILTER_BY_WHERE_OPS = new Set([
