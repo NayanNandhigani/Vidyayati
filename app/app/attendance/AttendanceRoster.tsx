@@ -16,10 +16,10 @@ type Props = {
   canEdit: boolean;
 };
 
-const MARKS: { key: AttendanceStatus; label: string; className: string }[] = [
-  { key: "PRESENT", label: "P", className: "att-p" },
-  { key: "ABSENT", label: "A", className: "att-a" },
-  { key: "HALF_DAY", label: "H", className: "att-h" },
+const MARKS: { key: AttendanceStatus; label: string }[] = [
+  { key: "PRESENT", label: "P" },
+  { key: "ABSENT", label: "A" },
+  { key: "HALF_DAY", label: "H" },
 ];
 
 type SortField = "name" | "admissionNo";

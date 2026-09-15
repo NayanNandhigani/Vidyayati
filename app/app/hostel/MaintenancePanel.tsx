@@ -7,7 +7,7 @@ import { addMaintenanceLog, updateMaintenanceStatus, deleteMaintenanceLog } from
 const TYPE_LABEL: Record<HostelLogType, string> = { LAUNDRY: "Laundry", MAINTENANCE: "Maintenance" };
 const STATUS_STYLE: Record<HostelLogStatus, { bg: string; fg: string; label: string }> = {
   PENDING: { bg: "var(--warn-tint)", fg: "var(--warn)", label: "Pending" },
-  IN_PROGRESS: { bg: "var(--info-tint, var(--marigold-tint))", fg: "var(--info, var(--marigold-deep))", label: "In progress" },
+  IN_PROGRESS: { bg: "var(--info-tint)", fg: "var(--info)", label: "In progress" },
   DONE: { bg: "var(--good-tint)", fg: "var(--good)", label: "Done" },
 };
 const STATUSES: HostelLogStatus[] = ["PENDING", "IN_PROGRESS", "DONE"];

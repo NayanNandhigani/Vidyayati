@@ -608,7 +608,12 @@ export function PurchaseOrderForm({ vendors, consumables }: { vendors: { id: str
   );
 }
 
-const PO_STATUS_COLOR: Record<string, string> = { DRAFT: "var(--faint)", ORDERED: "var(--info)", RECEIVED: "var(--good)", CANCELLED: "var(--critical)" };
+const PO_STATUS_STYLE: Record<string, { bg: string; fg: string }> = {
+  DRAFT: { bg: "var(--line)", fg: "var(--faint)" },
+  ORDERED: { bg: "var(--info-tint)", fg: "var(--info)" },
+  RECEIVED: { bg: "var(--good-tint)", fg: "var(--good)" },
+  CANCELLED: { bg: "var(--critical-tint)", fg: "var(--critical)" },
+};
 
 export function PurchaseOrderRow({ po }: { po: { id: string; poNumber: string; vendorName: string; itemDescription: string; quantity: number; unitCost: number; status: string; orderDate: string } }) {
   const [pending, startTransition] = useTransition();
@@ -624,7 +629,7 @@ export function PurchaseOrderRow({ po }: { po: { id: string; poNumber: string; v
       <div className="mono" style={{ color: "var(--muted)" }}>{formatINR(total)}</div>
       <div style={{ fontSize: 10.5, color: "var(--faint)" }}>{new Date(po.orderDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <span className="pill" style={{ background: "transparent", border: `1px solid ${PO_STATUS_COLOR[po.status]}`, color: PO_STATUS_COLOR[po.status] }}>
+        <span className="pill" style={{ background: PO_STATUS_STYLE[po.status].bg, color: PO_STATUS_STYLE[po.status].fg }}>
           {po.status}
         </span>
         {po.status === "DRAFT" && (
