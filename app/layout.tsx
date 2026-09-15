@@ -28,6 +28,7 @@ export const metadata: Metadata = {
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  console.log("[layout-debug] rendering root layout");
   return (
     <html lang="en" className={`${fraunces.variable} ${jakarta.variable} ${plexMono.variable}`}>
       <body>{children}</body>

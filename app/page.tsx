@@ -15,7 +15,15 @@ const STATS = [
   { value: "100%", label: "tenant-isolated by school" },
 ];
 
+// This was the only remaining statically-prerendered route in the app —
+// same failure mode as the /login redirect loop this replaces: a static
+// page ships a year-long default cache lifetime, and any response
+// captured while something was misconfigured can get stuck being served
+// indefinitely, surviving redeploys since they only rebuild the container.
+export const dynamic = "force-dynamic";
+
 export default function MarketingHome() {
+  console.log("[page-debug] rendering /");
   return (
     <div style={{ background: "#0a0e1a", color: "#e8ebf5", minHeight: "100dvh" }}>
       <header
