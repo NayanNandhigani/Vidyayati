@@ -13,7 +13,7 @@ const MODULES = ["Students", "Employees", "Attendance", "Exams", "Homework", "Ti
 // Only these modules act on one class at a time — the rest (Fees, Accounts,
 // Admissions, etc.) don't have a per-class concept, so they only ever get
 // the school-wide row and no "+ add class override" control.
-const CLASS_SCOPED_MODULES = new Set(["Students", "Attendance", "Exams", "Homework", "Timetable"]);
+const CLASS_SCOPED_MODULES = new Set(["Students", "Attendance", "Exams", "Homework", "Timetable", "Teaching"]);
 
 const LEVEL_STYLE: Record<AccessLevel, { bg: string; fg: string; label: string }> = {
   NONE: { bg: "var(--line)", fg: "var(--faint)", label: "No access" },

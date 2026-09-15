@@ -124,6 +124,7 @@ model School {
   classes              Class[]
   subjects             Subject[]
   classSubjectTeachers ClassSubjectTeacher[]
+  syllabusTopics       SyllabusTopic[]
   students             Student[]
   attendance           Attendance[]
   staffAttendance      StaffAttendance[]
@@ -820,6 +821,7 @@ model StaffProfile {
   wardenOfRooms      HostelRoom[]
   examInvigilations  ExamSchedule[]
   hostelAttendanceMarked HostelAttendance[]
+  syllabusTopicsLogged   SyllabusTopic[]
 
   @@index([schoolId])
   @@map("staff_profiles")
@@ -1064,6 +1066,7 @@ model Class {
   coTeachers       ClassCoTeacher[]
   enrollments      Enrollment[]
   attendance       Attendance[]
+  syllabusTopics   SyllabusTopic[]
 
   @@unique([yearId, grade, section])
   @@index([schoolId])
@@ -1102,6 +1105,7 @@ model Subject {
   homework         Homework[]
   timetableSlots   TimetableSlot[]
   classAssignments ClassSubjectTeacher[]
+  syllabusTopics   SyllabusTopic[]
 
   @@unique([schoolId, name])
   @@index([schoolId])
@@ -1125,6 +1129,42 @@ model ClassSubjectTeacher {
   @@unique([classId, subjectId])
   @@index([schoolId])
   @@map("class_subject_teachers")
+}
+
+enum SyllabusTopicStatus {
+  PLANNED
+  COMPLETED
+}
+
+// A subject's planned teaching outline within one class — what the
+// Teaching module (syllabus/topic coverage tracking) is built on. Each row
+// is one topic; a teacher checks it off as covered, recording when and
+// optionally a note, rather than this being a free-floating log — so
+// completion % per subject is just completed/total over this table.
+model SyllabusTopic {
+  id        String  @id @default(cuid())
+  schoolId  String  @map("school_id")
+  school    School  @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  classId   String  @map("class_id")
+  class     Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  subjectId String  @map("subject_id")
+  subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  title      String
+  orderIndex Int                 @default(0) @map("order_index")
+  status     SyllabusTopicStatus @default(PLANNED)
+
+  coveredOn       DateTime?     @map("covered_on") // date the topic was actually taught, set when marked covered
+  note            String?       @db.Text // optional note logged alongside marking it covered
+  loggedByStaffId String?       @map("logged_by_staff_id")
+  loggedByStaff   StaffProfile? @relation(fields: [loggedByStaffId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([schoolId])
+  @@index([classId, subjectId])
+  @@map("syllabus_topics")
 }
 
 enum StudentStatus {
