@@ -8,6 +8,7 @@ const { auth } = NextAuth(authConfig);
 
 export default auth((req) => {
   const { nextUrl } = req;
+  console.log(`[middleware-diag] invoked for ${nextUrl.pathname}`);
   const isLoggedIn = !!req.auth;
   const role = req.auth?.user?.role;
 
@@ -56,6 +57,10 @@ export default auth((req) => {
   return NextResponse.next();
 });
 
+// TEMP DIAG: widened to catch everything ("/:path*") to empirically prove
+// or disprove whether middleware is somehow being invoked for /signin
+// despite the narrower matcher below — restore to the two real routes
+// once this live investigation concludes.
 export const config = {
-  matcher: ["/app/:path*", "/super-admin/:path*"],
+  matcher: ["/:path*"],
 };
