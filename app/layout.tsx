@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Fraunces, Plus_Jakarta_Sans, IBM_Plex_Mono } from "next/font/google";
+import { headers } from "next/headers";
 import "./globals.css";
 
 const fraunces = Fraunces({
@@ -25,9 +26,18 @@ export const metadata: Metadata = {
   description: "School & kindergarten management, built for the Indian market.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const h = await headers();
+  console.log(
+    JSON.stringify({
+      diag: "root-layout",
+      host: h.get("host"),
+      xForwardedHost: h.get("x-forwarded-host"),
+      xForwardedProto: h.get("x-forwarded-proto"),
+    }),
+  );
   return (
     <html lang="en" className={`${fraunces.variable} ${jakarta.variable} ${plexMono.variable}`}>
       <body>{children}</body>
