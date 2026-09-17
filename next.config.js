@@ -1,26 +1,20 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // The actual root cause of the long-running /signin (and even /)
-  // self-redirect loop under `next start` on Railway (and any reverse
-  // proxy without an explicit --hostname passed to `next start`):
-  // node_modules/next/dist/server/next-server.js constructs the URL it
-  // hands to the middleware runtime as
-  // `${protocol}://${this.fetchHostname || 'localhost'}:${port}${path}`
-  // — with no --hostname flag, this.fetchHostname is unset and it falls
-  // back to the literal string "localhost", regardless of the real
-  // incoming Host/X-Forwarded-Host headers (confirmed live: a temporary
-  // /api/debug-headers route showed `request.url` as
-  // "https://localhost:8080/..." even though Host and X-Forwarded-Host
-  // both correctly showed the public domain). Every downstream URL this
-  // app derives from that request — next-auth's trustHost origin
-  // detection included — inherits the wrong "localhost" origin, and
-  // something in that chain issues a same-path redirect that resolves
-  // to a no-op self-redirect on whatever page triggered it.
-  // skipMiddlewareUrlNormalize makes Next.js use the real incoming
-  // request URL instead of reconstructing this synthetic one. We don't
-  // use i18n or trailingSlash, so this has no other effect for us.
-  skipMiddlewareUrlNormalize: true,
+  // TEMP DIAG round 8: skipMiddlewareUrlNormalize removed for isolation.
+  // It was added on the theory that it fixed a "localhost" origin bug in
+  // middleware's invocation URL, but /signin's matcher already excludes
+  // it from middleware entirely, so that fix could never have touched
+  // this path -- and this flag changes how resolve-routes.js normalizes
+  // EVERY incoming URL, not just middleware-matched ones. Testing
+  // whether removing it (while everything else stays the same) stops
+  // the self-redirect settles whether this flag itself is the actual
+  // cause, since nothing else in this file or our own code can produce
+  // it (confirmed live: [[SIGNIN-PAGE-RENDERED]] fires in Railway's
+  // deploy logs for every request that gets redirected, proving the
+  // page component itself runs and returns real JSX with no redirect()
+  // call anywhere in its render tree -- the redirect is added by
+  // something in Next's own request pipeline after that).
   async redirects() {
     // /login was the route's name before it was renamed to /signin —
     // keep old bookmarks/links working. `permanent: false` (307) is
