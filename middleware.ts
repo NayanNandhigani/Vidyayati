@@ -8,6 +8,13 @@ const { auth } = NextAuth(authConfig);
 
 export default auth((req) => {
   const { nextUrl } = req;
+  console.log(
+    JSON.stringify({
+      diag: "middleware",
+      pathname: nextUrl.pathname,
+      isLoggedIn: !!req.auth,
+    }),
+  );
   const isLoggedIn = !!req.auth;
   const role = req.auth?.user?.role;
 
