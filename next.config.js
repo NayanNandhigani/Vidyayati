@@ -1,6 +1,26 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // The actual root cause of the long-running /signin (and even /)
+  // self-redirect loop under `next start` on Railway (and any reverse
+  // proxy without an explicit --hostname passed to `next start`):
+  // node_modules/next/dist/server/next-server.js constructs the URL it
+  // hands to the middleware runtime as
+  // `${protocol}://${this.fetchHostname || 'localhost'}:${port}${path}`
+  // — with no --hostname flag, this.fetchHostname is unset and it falls
+  // back to the literal string "localhost", regardless of the real
+  // incoming Host/X-Forwarded-Host headers (confirmed live: a temporary
+  // /api/debug-headers route showed `request.url` as
+  // "https://localhost:8080/..." even though Host and X-Forwarded-Host
+  // both correctly showed the public domain). Every downstream URL this
+  // app derives from that request — next-auth's trustHost origin
+  // detection included — inherits the wrong "localhost" origin, and
+  // something in that chain issues a same-path redirect that resolves
+  // to a no-op self-redirect on whatever page triggered it.
+  // skipMiddlewareUrlNormalize makes Next.js use the real incoming
+  // request URL instead of reconstructing this synthetic one. We don't
+  // use i18n or trailingSlash, so this has no other effect for us.
+  skipMiddlewareUrlNormalize: true,
   async redirects() {
     // /login was the route's name before it was renamed to /signin —
     // keep old bookmarks/links working. `permanent: false` (307) is
